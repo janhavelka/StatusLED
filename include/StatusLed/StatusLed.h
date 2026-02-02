@@ -16,6 +16,8 @@
 
 namespace StatusLed {
 
+struct BackendBase;
+
 /**
  * @brief Simple RGB color.
  */
@@ -125,7 +127,7 @@ struct LedSnapshot {
  * cfg.dataPin = 48;
  * cfg.ledCount = 3;
  * auto st = leds.begin(cfg);
- * if (!st.ok()) { /* handle error */ }
+ * if (!st.ok()) { // handle error }
  *
  * leds.setPreset(0, StatusLed::StatusPreset::Ready);
  *
@@ -279,8 +281,36 @@ class StatusLed {
   uint8_t ledCount() const { return _config.ledCount; }
 
  private:
- struct LedState;
- struct BackendBase;
+  struct LedState {
+    Mode mode = Mode::Off;
+    ModeParams params{};
+    RgbColor color{};
+    RgbColor altColor{};
+    uint8_t brightness = 255;
+    uint8_t intensity = 0;
+    uint8_t phase = 0;
+    bool useAlt = false;
+    uint32_t nextUpdateMs = 0;
+    uint32_t phaseEndMs = 0;
+    uint32_t modeStartMs = 0;
+    StatusPreset currentPreset = StatusPreset::Off;
+    StatusPreset defaultPreset = StatusPreset::Off;
+
+    bool tempActive = false;
+    bool tempPending = false;
+    StatusPreset tempPreset = StatusPreset::Off;
+    uint32_t tempUntilMs = 0;
+    uint32_t tempDurationMs = 0;
+
+    Mode resumeMode = Mode::Off;
+    ModeParams resumeParams{};
+    RgbColor resumeColor{};
+    RgbColor resumeAltColor{};
+    uint8_t resumeBrightness = 255;
+    StatusPreset resumePreset = StatusPreset::Off;
+
+    uint32_t lfsr = 0xABCDEu;
+  };
 
   Status setModeInternal(uint8_t index, Mode mode, const ModeParams& params);
   Status setColorInternal(uint8_t index, const RgbColor& color, bool secondary);

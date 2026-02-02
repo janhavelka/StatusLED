@@ -210,38 +210,7 @@ static bool isValidMode(Mode mode) {
 
 }  // namespace
 
-struct StatusLed::LedState {
-  Mode mode = Mode::Off;
-  ModeParams params{};
-  RgbColor color{};
-  RgbColor altColor{};
-  uint8_t brightness = 255;
-  uint8_t intensity = 0;
-  uint8_t phase = 0;
-  bool useAlt = false;
-  uint32_t nextUpdateMs = 0;
-  uint32_t phaseEndMs = 0;
-  uint32_t modeStartMs = 0;
-  StatusPreset currentPreset = StatusPreset::Off;
-  StatusPreset defaultPreset = StatusPreset::Off;
-
-  bool tempActive = false;
-  bool tempPending = false;
-  StatusPreset tempPreset = StatusPreset::Off;
-  uint32_t tempUntilMs = 0;
-  uint32_t tempDurationMs = 0;
-
-  Mode resumeMode = Mode::Off;
-  ModeParams resumeParams{};
-  RgbColor resumeColor{};
-  RgbColor resumeAltColor{};
-  uint8_t resumeBrightness = 255;
-  StatusPreset resumePreset = StatusPreset::Off;
-
-  uint32_t lfsr = 0xABCDEu;
-};
-
-struct StatusLed::BackendBase {
+struct BackendBase {
   virtual ~BackendBase() = default;
   virtual Status begin(const Config& config) = 0;
   virtual void end() = 0;
@@ -277,7 +246,7 @@ class NeoPixelBusWrapper final : public NeoPixelBusWrapperBase {
   NeoPixelBus<NeoGrbFeature, Method> _bus;
 };
 
-class BackendNeoPixelBus final : public StatusLed::BackendBase {
+class BackendNeoPixelBus final : public BackendBase {
  public:
   Status begin(const Config& config) override {
     end();
@@ -348,7 +317,7 @@ class BackendNeoPixelBus final : public StatusLed::BackendBase {
 #if defined(STATUSLED_BACKEND_IDF_WS2812)
 namespace {
 
-class BackendIdfWs2812 final : public StatusLed::BackendBase {
+class BackendIdfWs2812 final : public BackendBase {
  public:
   Status begin(const Config& config) override {
     end();
@@ -431,7 +400,7 @@ class BackendIdfWs2812 final : public StatusLed::BackendBase {
 #if defined(STATUSLED_BACKEND_NULL)
 namespace {
 
-class BackendNull final : public StatusLed::BackendBase {
+class BackendNull final : public BackendBase {
  public:
   Status begin(const Config&) override { return Ok(); }
   void end() override {}
