@@ -8,22 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- StatusLed library with non-blocking status LED engine
-- Mode/preset architecture with color separation and dirty-frame updates
-- NeoPixelBus backend (RMT) with configurable channel selection
-- Fallback backend option for WS2812 driver
-- Interactive CLI example with full API access and stress test
-- Host-based unit tests for timing/state transitions
+- Nothing yet
 
 ### Changed
-- Updated README and AGENTS guidelines for status LED subsystem
-- Updated platformio.ini environments and dependencies
+- Nothing yet
 
 ### Deprecated
 - Nothing yet
 
 ### Removed
-- Removed compile-only example in favor of a single fully featured CLI demo
+- Nothing yet
 
 ### Fixed
 - Nothing yet
@@ -31,11 +25,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 - Nothing yet
 
-## [0.1.0] - 2026-01-10
+## [1.0.0] - 2026-02-02
 
 ### Added
-- Initial release with template structure
-- ESP32-S2 and ESP32-S3 support
+- StatusLed library with non-blocking status LED engine
+- Mode/preset architecture with color separation and dirty-frame updates
+- NeoPixelBus backend (RMT) with configurable channel selection
+- IDF WS2812 backend (legacy RMT) with safe-by-default selection
+- Interactive CLI example with full API access and stress test
+- Host-based unit tests for timing/state transitions
 
-[Unreleased]: https://github.com/YOUR_USERNAME/status-led/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/YOUR_USERNAME/status-led/releases/tag/v0.1.0
+### Changed
+- Updated README and AGENTS guidelines for status LED subsystem
+- Updated PlatformIO environments and backend selection macros
+
+### Removed
+- Removed compile-only example in favor of a single fully featured CLI demo
+
+### Fixed
+- Hardened backend selection guards and compilation isolation
+- Added bounds checks and nonblocking guards in backends and engine
+
+### Security
+- Nothing yet
+
+[Unreleased]: https://github.com/janhavelka/StatusLED/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/janhavelka/StatusLED/releases/tag/v1.0.0

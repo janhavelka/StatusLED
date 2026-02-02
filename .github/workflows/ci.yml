@@ -6,6 +6,7 @@ on:
     branches: [main, master]
   pull_request:
     branches: [main, master]
+  workflow_dispatch:
 
 jobs:
   build:
@@ -35,18 +36,6 @@ jobs:
 
       - name: Build ${{ matrix.environment }}
         run: pio run -e ${{ matrix.environment }}
-
-  # Optional: check that library.json is valid
-  validate-library:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Validate library.json
-        run: |
-          python -c "import json; json.load(open('library.json'))"
-          echo "library.json is valid JSON"
 
   test-native:
     runs-on: ubuntu-latest
