@@ -15,8 +15,6 @@ jobs:
         environment:
           - cli_esp32s3
           - cli_esp32s2
-          - compile_only_esp32s3
-          - compile_only_esp32s2
       fail-fast: false
 
     steps:

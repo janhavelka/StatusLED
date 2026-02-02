@@ -5,9 +5,6 @@ Production-grade status LED subsystem for ESP32-S2/S3 (WS2812/NeoPixel-class) us
 ## Quickstart
 
 ```bash
-# Build compile-only example (S3)
-pio run -e compile_only_esp32s3
-
 # Upload CLI example (S3)
 pio run -e cli_esp32s3 -t upload
 pio device monitor -e cli_esp32s3
@@ -176,15 +173,11 @@ application uses `neopixelWrite()` or board RGB helpers, prefer the fallback bac
 
 | Example                 | Description                                         |
 | ----------------------- | --------------------------------------------------- |
-| `00_compile_only`       | Minimal skeleton; verifies library compiles         |
 | `01_status_led_cli`     | Interactive CLI with full API access + stress test  |
 
 ### Building Examples
 
 ```bash
-# Compile-only (S3)
-pio run -e compile_only_esp32s3
-
 # CLI (S2)
 pio run -e cli_esp32s2 -t upload
 pio device monitor -e cli_esp32s2
@@ -216,7 +209,6 @@ include/StatusLed/   # Public headers (library API)
 src/
   |-- StatusLed.cpp
 examples/
-  |-- 00_compile_only/
   |-- 01_status_led_cli/
   |-- common/
 ```

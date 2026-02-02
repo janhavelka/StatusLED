@@ -22,7 +22,7 @@ namespace pins {
 
 /// @brief WS2812 data pin. Example default for ESP32-S3 (GPIO48).
 /// @note ESP32-S2 commonly uses GPIO18 for onboard LED. Override for your board.
-static constexpr int LED_DATA = 48;
+static constexpr int LED_DATA = 47;
 
 /// @brief Default LED count for examples.
 static constexpr uint8_t LED_COUNT = 3;

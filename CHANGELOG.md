@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Nothing yet
 
 ### Removed
-- Nothing yet
+- Removed compile-only example in favor of a single fully featured CLI demo
 
 ### Fixed
 - Nothing yet

@@ -27,7 +27,6 @@ include/StatusLed/   - Public API headers ONLY (Doxygen documented)
   |-- StatusLed.h    - Main library class
 src/                 - Implementation (.cpp files)
 examples/
-  |-- 00_compile_only/       - Example applications
   |-- 01_status_led_cli/     - Interactive CLI demo
   |-- common/                - Example-only helpers (Log.h, BoardPins.h)
 platformio.ini       - Build environments (uses build_src_filter)
