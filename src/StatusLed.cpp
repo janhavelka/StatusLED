@@ -17,6 +17,7 @@ static constexpr uint8_t kDimLevel = 48;  // ~19% brightness
 static constexpr uint32_t kNever = 0xFFFFFFFFu;
 static constexpr uint16_t kMinSmoothStepMs = 5;
 static constexpr uint16_t kMaxSmoothStepMs = 1000;
+static constexpr uint32_t kMaxDurationMs = 0x7FFFFFFFu;
 
 struct PatternStep {
   uint16_t durationMs;
@@ -130,6 +131,10 @@ static uint8_t lerpU8(uint8_t minVal, uint8_t maxVal, uint16_t pos, uint16_t spa
   const uint16_t range = static_cast<uint16_t>(maxVal - minVal);
   const uint16_t scaled = static_cast<uint16_t>((static_cast<uint32_t>(range) * pos) / span);
   return static_cast<uint8_t>(minVal + scaled);
+}
+
+static uint8_t safeLedCount(uint8_t count) {
+  return (count <= kMaxLeds) ? count : kMaxLeds;
 }
 
 static ModeParams sanitizeParams(Mode mode, ModeParams params) {
@@ -369,6 +374,9 @@ Status StatusLed::setTemporaryPreset(uint8_t index, StatusPreset preset, uint32_
   if (durationMs == 0) {
     return setLast(Status(Err::INVALID_CONFIG, 0, "durationMs must be > 0"));
   }
+  if (durationMs > kMaxDurationMs) {
+    return setLast(Status(Err::INVALID_CONFIG, 0, "durationMs too large"));
+  }
   if (findPreset(preset) == nullptr) {
     return setLast(Status(Err::INVALID_CONFIG, static_cast<int32_t>(preset), "Unknown preset"));
   }
@@ -400,7 +408,8 @@ Status StatusLed::setGlobalBrightness(uint8_t level) {
   }
 
   _config.globalBrightness = level;
-  for (uint8_t i = 0; i < _config.ledCount; ++i) {
+  const uint8_t count = safeLedCount(_config.ledCount);
+  for (uint8_t i = 0; i < count; ++i) {
     refreshLedOutput(i);
   }
   return setLast(Ok());
@@ -487,6 +496,9 @@ void StatusLed::refreshLedOutput(uint8_t index) {
 }
 
 void StatusLed::refreshLedOutput(uint8_t index, uint8_t intensity, bool useAlt) {
+  if (index >= kMaxLeds || index >= _config.ledCount) {
+    return;
+  }
   const LedState& led = _leds[index];
   const RgbColor base = useAlt ? led.altColor : led.color;
 
@@ -700,12 +712,13 @@ void StatusLed::tick(uint32_t now_ms) {
 
   _lastTickMs = now_ms;
 
-  for (uint8_t i = 0; i < _config.ledCount; ++i) {
+  const uint8_t count = safeLedCount(_config.ledCount);
+  for (uint8_t i = 0; i < count; ++i) {
     updateLed(i, now_ms);
   }
 
   if (_frameDirty && _backend && _backend->canShow()) {
-    const Status st = _backend->show(_frame, _config.ledCount, _config.colorOrder);
+    const Status st = _backend->show(_frame, count, _config.colorOrder);
     if (st.ok()) {
       _frameDirty = false;
     } else if (st.code == Err::RESOURCE_BUSY) {

@@ -320,7 +320,7 @@ class StatusLed {
   void refreshLedOutput(uint8_t index, uint8_t intensity, bool useAlt);
   void refreshLedOutput(uint8_t index);
 
-  bool indexValid(uint8_t index) const { return index < _config.ledCount; }
+  bool indexValid(uint8_t index) const { return index < _config.ledCount && index < kMaxLedCount; }
   Status setLast(const Status& st) {
     _lastStatus = st;
     return st;
