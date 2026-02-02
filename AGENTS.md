@@ -115,6 +115,8 @@ void end();                          // Cleanup
 - Avoid mixing legacy and next-gen RMT drivers in the same build
 - Provide a fallback backend if driver conflicts are observed
 - Never ship a configuration that can boot-loop or abort at runtime
+- Default backend is IDF WS2812; NeoPixelBus is opt-in per env
+- Backend code must not pull conflicting driver APIs into the binary
 
 ---
 
@@ -244,5 +246,6 @@ Before committing:
 - [ ] No logging in library code
 - [ ] Examples demonstrate correct usage
 - [ ] CHANGELOG.md updated
+- [ ] Smoke test `cli_esp32s3_idf` and `cli_esp32s2_idf` on hardware (boot + basic LED output)
 
 **If any item fails, fix before proceeding.**

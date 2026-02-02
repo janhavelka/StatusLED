@@ -16,6 +16,16 @@
 
 namespace StatusLed {
 
+#if (defined(STATUSLED_BACKEND_IDF_WS2812) + defined(STATUSLED_BACKEND_NEOPIXELBUS) + \
+     defined(STATUSLED_BACKEND_NULL)) == 0
+#error "Select exactly one backend: STATUSLED_BACKEND_IDF_WS2812, STATUSLED_BACKEND_NEOPIXELBUS, or STATUSLED_BACKEND_NULL"
+#endif
+
+#if (defined(STATUSLED_BACKEND_IDF_WS2812) + defined(STATUSLED_BACKEND_NEOPIXELBUS) + \
+     defined(STATUSLED_BACKEND_NULL)) > 1
+#error "Multiple backends selected. Define only one of STATUSLED_BACKEND_IDF_WS2812, STATUSLED_BACKEND_NEOPIXELBUS, STATUSLED_BACKEND_NULL"
+#endif
+
 struct BackendBase;
 
 /**

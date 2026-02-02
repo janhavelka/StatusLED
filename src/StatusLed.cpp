@@ -8,16 +8,6 @@
 #include <stddef.h>
 #include <new>
 
-#if !defined(STATUSLED_BACKEND_NEOPIXELBUS) && !defined(STATUSLED_BACKEND_IDF_WS2812) && !defined(STATUSLED_BACKEND_NULL)
-#define STATUSLED_BACKEND_NEOPIXELBUS 1
-#endif
-
-#if (defined(STATUSLED_BACKEND_NEOPIXELBUS) && defined(STATUSLED_BACKEND_IDF_WS2812)) || \
-    (defined(STATUSLED_BACKEND_NEOPIXELBUS) && defined(STATUSLED_BACKEND_NULL)) || \
-    (defined(STATUSLED_BACKEND_IDF_WS2812) && defined(STATUSLED_BACKEND_NULL))
-#error "Define exactly one StatusLed backend: STATUSLED_BACKEND_NEOPIXELBUS, STATUSLED_BACKEND_IDF_WS2812, or STATUSLED_BACKEND_NULL"
-#endif
-
 #if defined(STATUSLED_BACKEND_NEOPIXELBUS)
 #include <NeoPixelBus.h>
 #endif
@@ -25,8 +15,6 @@
 #if defined(STATUSLED_BACKEND_IDF_WS2812)
 extern "C" {
 #include "driver/rmt.h"
-#include "esp_err.h"
-#include "led_strip.h"
 }
 #endif
 
@@ -250,7 +238,6 @@ class BackendNeoPixelBus final : public BackendBase {
  public:
   Status begin(const Config& config) override {
     end();
-    _count = config.ledCount;
     _pin = static_cast<uint8_t>(config.dataPin);
 
     switch (config.rmtChannel) {
@@ -325,7 +312,10 @@ class BackendIdfWs2812 final : public BackendBase {
     _channel = static_cast<rmt_channel_t>(config.rmtChannel);
 
     rmt_config_t rmt_cfg = RMT_DEFAULT_CONFIG_TX(static_cast<gpio_num_t>(config.dataPin), _channel);
-    rmt_cfg.clk_div = 2;  // 40 MHz source for WS2812 timings
+    rmt_cfg.clk_div = kRmtClkDiv;
+    rmt_cfg.tx_config.idle_level = RMT_IDLE_LEVEL_LOW;
+    rmt_cfg.tx_config.idle_output_en = true;
+    rmt_cfg.tx_config.carrier_en = false;
 
     esp_err_t err = rmt_config(&rmt_cfg);
     if (err != ESP_OK) {
@@ -337,59 +327,93 @@ class BackendIdfWs2812 final : public BackendBase {
       return Status(Err::HARDWARE_FAULT, err, "rmt_driver_install failed");
     }
 
-    led_strip_config_t strip_cfg = LED_STRIP_DEFAULT_CONFIG(config.ledCount, (led_strip_dev_t)_channel);
-    _strip = led_strip_new_rmt_ws2812(&strip_cfg);
-    if (_strip == nullptr) {
-      rmt_driver_uninstall(_channel);
-      return Status(Err::HARDWARE_FAULT, 0, "led_strip_new_rmt_ws2812 failed");
-    }
-
     _installed = true;
     return Ok();
   }
 
   void end() override {
-    if (_strip) {
-      _strip->clear(_strip, 0);
-      _strip->del(_strip);
-      _strip = nullptr;
-    }
     if (_installed) {
       rmt_driver_uninstall(_channel);
       _installed = false;
     }
   }
 
-  bool canShow() const override { return true; }
+  bool canShow() const override {
+    if (!_installed) {
+      return false;
+    }
+    return rmt_wait_tx_done(_channel, 0) == ESP_OK;
+  }
 
   Status show(const RgbColor* frame, uint8_t count, ColorOrder order) override {
-    if (_strip == nullptr) {
+    if (!_installed) {
       return Status(Err::NOT_INITIALIZED, 0, "Backend not initialized");
     }
 
-    // Assume driver order is RGB for this backend.
-    const ColorOrder driverOrder = ColorOrder::RGB;
-
-    for (uint8_t i = 0; i < count; ++i) {
-      const RgbColor mapped = mapColorOrder(frame[i], order, driverOrder);
-      const esp_err_t err = _strip->set_pixel(_strip, i, mapped.r, mapped.g, mapped.b);
-      if (err != ESP_OK) {
-        return Status(Err::HARDWARE_FAULT, err, "led_strip set_pixel failed");
-      }
+    if (rmt_wait_tx_done(_channel, 0) == ESP_ERR_TIMEOUT) {
+      return Status(Err::RESOURCE_BUSY, 0, "rmt busy");
     }
 
-    const esp_err_t err = _strip->refresh(_strip, 0);
-    if (err == ESP_ERR_TIMEOUT) {
-      return Status(Err::RESOURCE_BUSY, err, "led_strip refresh busy");
+    const size_t itemCount = buildItems(frame, count, order);
+    if (itemCount == 0) {
+      return Status(Err::INTERNAL_ERROR, 0, "item build failed");
     }
+
+    const esp_err_t err = rmt_write_items(_channel, _items, static_cast<int>(itemCount), false);
     if (err != ESP_OK) {
-      return Status(Err::HARDWARE_FAULT, err, "led_strip refresh failed");
+      return Status(Err::HARDWARE_FAULT, err, "rmt_write_items failed");
     }
     return Ok();
   }
 
  private:
-  led_strip_t* _strip = nullptr;
+  static constexpr uint8_t kRmtClkDiv = 2;          // 80MHz / 2 = 40MHz
+  static constexpr uint16_t kT0H = 16;              // 0.4us
+  static constexpr uint16_t kT0L = 34;              // 0.85us
+  static constexpr uint16_t kT1H = 32;              // 0.8us
+  static constexpr uint16_t kT1L = 18;              // 0.45us
+  static constexpr uint16_t kResetTicks = 3200;     // 80us
+  static constexpr uint16_t kBitsPerLed = 24;
+  static constexpr uint16_t kMaxItems = (kMaxLeds * kBitsPerLed) + 1;
+
+  size_t buildItems(const RgbColor* frame, uint8_t count, ColorOrder order) {
+    if (count == 0 || count > kMaxLeds) {
+      return 0;
+    }
+
+    size_t idx = 0;
+    for (uint8_t i = 0; i < count; ++i) {
+      const RgbColor mapped = mapColorOrder(frame[i], ColorOrder::RGB, order);
+      encodeByte(mapped.r, idx);
+      encodeByte(mapped.g, idx);
+      encodeByte(mapped.b, idx);
+    }
+
+    if (idx >= kMaxItems) {
+      return 0;
+    }
+
+    rmt_item32_t& reset = _items[idx++];
+    reset.level0 = 0;
+    reset.duration0 = kResetTicks;
+    reset.level1 = 0;
+    reset.duration1 = 0;
+
+    return idx;
+  }
+
+  void encodeByte(uint8_t value, size_t& idx) {
+    for (int bit = 7; bit >= 0; --bit) {
+      const bool isOne = (value >> bit) & 0x1;
+      rmt_item32_t& item = _items[idx++];
+      item.level0 = 1;
+      item.duration0 = isOne ? kT1H : kT0H;
+      item.level1 = 0;
+      item.duration1 = isOne ? kT1L : kT0L;
+    }
+  }
+
+  rmt_item32_t _items[kMaxItems]{};
   rmt_channel_t _channel = RMT_CHANNEL_0;
   bool _installed = false;
 };

@@ -5,17 +5,17 @@ Production-grade status LED subsystem for ESP32-S2/S3 (WS2812/NeoPixel-class) us
 ## Quickstart
 
 ```bash
-# Upload CLI example (S3)
-pio run -e cli_esp32s3 -t upload
-pio device monitor -e cli_esp32s3
+# Upload CLI example (S3, IDF backend)
+pio run -e cli_esp32s3_idf -t upload
+pio device monitor -e cli_esp32s3_idf
 ```
 
 ## Supported Targets
 
 | Board                 | Environment       | Notes            |
 | --------------------- | ----------------- | ---------------- |
-| ESP32-S3-DevKitC-1    | `cli_esp32s3`      | USB CDC enabled  |
-| ESP32-S2-Saola-1      | `cli_esp32s2`      | USB CDC enabled  |
+| ESP32-S3-DevKitC-1    | `cli_esp32s3_idf`  | USB CDC enabled  |
+| ESP32-S2-Saola-1      | `cli_esp32s2_idf`  | USB CDC enabled  |
 
 ## Versioning
 
@@ -142,18 +142,17 @@ Semantic presets (mode + color):
 
 ## Backend Selection and RMT Safety
 
-Default backend is NeoPixelBus (RMT). If you see a boot-loop or log message similar to:
-`CONFLICT! driver_ng is not allowed to be used with the legacy driver`
-then rebuild with the fallback backend.
+Arduino-ESP32 v3.x can abort at boot if legacy RMT and next-gen RMT drivers are
+linked together. To reduce this risk, **IDF WS2812 is the recommended default**.
 
-Use one backend at a time:
+Choose a backend by selecting the matching PlatformIO environment:
 
-- Default (NeoPixelBus): `-DSTATUSLED_BACKEND_NEOPIXELBUS=1`
-- Fallback (ESP-IDF WS2812 driver): `-DSTATUSLED_BACKEND_IDF_WS2812=1`
-- Tests (host): `-DSTATUSLED_BACKEND_NULL=1`
+- **IDF backend (recommended):** `cli_esp32s3_idf`, `cli_esp32s2_idf`
+- **NeoPixelBus backend (opt-in):** `cli_esp32s3_neopixelbus`, `cli_esp32s2_neopixelbus`
+- **Host tests:** `native` (uses `STATUSLED_BACKEND_NULL`)
 
-Avoid linking both legacy and next-gen RMT drivers in the same build. If your
-application uses `neopixelWrite()` or board RGB helpers, prefer the fallback backend.
+If your application uses `neopixelWrite()` or board RGB helpers, prefer the IDF backend to
+avoid legacy vs NG driver conflicts.
 
 ## Threading and Timing Model
 
@@ -178,9 +177,9 @@ application uses `neopixelWrite()` or board RGB helpers, prefer the fallback bac
 ### Building Examples
 
 ```bash
-# CLI (S2)
-pio run -e cli_esp32s2 -t upload
-pio device monitor -e cli_esp32s2
+# CLI (S2, IDF backend)
+pio run -e cli_esp32s2_idf -t upload
+pio device monitor -e cli_esp32s2_idf
 ```
 
 ## Tests
@@ -191,12 +190,15 @@ Host-based unit tests for timing and state transitions:
 pio test -e native
 ```
 
+Requires a host C++ compiler (GCC/Clang). On Windows, install MinGW-w64
+(e.g., WinLibs) and ensure `gcc`/`g++` are in `PATH` (restart shell after install).
+
 ## Adding New Modes or Presets
 
 1. Add a new `Mode` or `StatusPreset` in `include/StatusLed/StatusLed.h`.
 2. Add behavior in `src/StatusLed.cpp` (`updateLed()` and presets table).
 3. Update README mode/preset list.
-4. Add or update tests in `test/native`.
+4. Add or update tests in `test/`.
 
 ## Project Structure
 

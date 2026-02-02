@@ -13,8 +13,10 @@ jobs:
     strategy:
       matrix:
         environment:
-          - cli_esp32s3
-          - cli_esp32s2
+          - cli_esp32s3_idf
+          - cli_esp32s2_idf
+          - cli_esp32s3_neopixelbus
+          - cli_esp32s2_neopixelbus
       fail-fast: false
 
     steps:
