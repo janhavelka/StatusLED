@@ -13,10 +13,10 @@ jobs:
     strategy:
       matrix:
         environment:
-          - ex_cli_s3
-          - ex_cli_s2
-          - ex_compile_only_s3
-          - ex_compile_only_s2
+          - cli_esp32s3
+          - cli_esp32s2
+          - compile_only_esp32s3
+          - compile_only_esp32s2
       fail-fast: false
 
     steps:
@@ -47,3 +47,22 @@ jobs:
         run: |
           python -c "import json; json.load(open('library.json'))"
           echo "library.json is valid JSON"
+
+  test-native:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install PlatformIO
+        run: |
+          python -m pip install --upgrade pip
+          pip install platformio
+
+      - name: Run native tests
+        run: pio test -e native

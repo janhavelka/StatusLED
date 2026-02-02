@@ -1,123 +1,92 @@
-# esp32-platformio-library-template
+﻿# StatusLED
 
-A clean, robust **single-library** template for **ESP32 (S2/S3)** using **Arduino framework** with **PlatformIO**.
-
-[![CI](https://github.com/YOUR_USERNAME/esp32-platformio-library-template/actions/workflows/ci.yml/badge.svg)](https://github.com/YOUR_USERNAME/esp32-platformio-library-template/actions/workflows/ci.yml)
+Production-grade status LED subsystem for ESP32-S2/S3 (WS2812/NeoPixel-class) using Arduino + PlatformIO.
 
 ## Quickstart
 
 ```bash
-# Clone
-git clone https://github.com/YOUR_USERNAME/esp32-platformio-library-template.git
-cd esp32-platformio-library-template
+# Build compile-only example (S3)
+pio run -e compile_only_esp32s3
 
-# Build for ESP32-S3
-pio run -e ex_cli_s3
-
-# Upload and monitor
-pio run -e ex_cli_s3 -t upload && pio device monitor -e ex_cli_s3
+# Upload CLI example (S3)
+pio run -e cli_esp32s3 -t upload
+pio device monitor -e cli_esp32s3
 ```
 
 ## Supported Targets
 
-| Board                    | Environment       | Notes                    |
-| ------------------------ | ----------------- | ------------------------ |
-| ESP32-S3-MINI-1U-N4R2    | `ex_cli_s3`       | PSRAM enabled            |
-| ESP32-S2-MINI-2-N4       | `ex_cli_s2`       | No PSRAM                 |
+| Board                 | Environment       | Notes            |
+| --------------------- | ----------------- | ---------------- |
+| ESP32-S3-DevKitC-1    | `cli_esp32s3`      | USB CDC enabled  |
+| ESP32-S2-Saola-1      | `cli_esp32s2`      | USB CDC enabled  |
 
 ## Versioning
 
-The library version is defined in [library.json](library.json). A pre-build script automatically generates `include/YourLibrary/Version.h` with version constants.
+The library version is defined in `library.json`. A pre-build script generates `include/StatusLed/Version.h`.
 
-**Print version in your code:**
 ```cpp
-#include "YourLibrary/Version.h"
+#include "StatusLed/Version.h"
 
-Serial.println(YourLibrary::VERSION);           // "0.1.0"
-Serial.println(YourLibrary::VERSION_FULL);      // "0.1.0 (a1b2c3d, 2026-01-10 15:30:00)"
-Serial.println(YourLibrary::BUILD_TIMESTAMP);   // "2026-01-10 15:30:00"
-Serial.println(YourLibrary::GIT_COMMIT);        // "a1b2c3d"
+Serial.println(StatusLed::VERSION);
+Serial.println(StatusLed::VERSION_FULL);
 ```
 
-**Available constants:**
-- `VERSION`, `VERSION_MAJOR`, `VERSION_MINOR`, `VERSION_PATCH`, `VERSION_CODE`
-- `BUILD_DATE`, `BUILD_TIME`, `BUILD_TIMESTAMP`
-- `GIT_COMMIT`, `GIT_STATUS` (clean/dirty)
-- `VERSION_FULL` (version + build info)
-
-**Update version:** Edit `library.json` only. `Version.h` is auto-generated on every build.
-
-## API
-
-The library follows a **begin/tick/end** lifecycle:
+## API Overview
 
 ```cpp
-#include "YourLibrary/YourLib.h"
+#include "StatusLed/StatusLed.h"
 
-YourLibrary::YourLib lib;
+StatusLed::StatusLed leds;
 
 void setup() {
-  YourLibrary::Config cfg;
-cfg.ledPin = 48;
-cfg.intervalMs = 1000;
-  YourLibrary::Status st = lib.begin(cfg);
+  StatusLed::Config cfg;
+  cfg.dataPin = 48;
+  cfg.ledCount = 3;
+  cfg.colorOrder = StatusLed::ColorOrder::GRB;
+  cfg.rmtChannel = 0;
+
+  auto st = leds.begin(cfg);
   if (!st.ok()) {
-    // Handle error: st.code, st.msg, st.detail
+    // handle error
   }
+
+  leds.setPreset(0, StatusLed::StatusPreset::Ready);
 }
 
 void loop() {
-  lib.tick(millis());  // Non-blocking, call every iteration
-}
-
-// Optional cleanup
-void shutdown() {
-  lib.end();
+  leds.tick(millis());
 }
 ```
 
 ### Core Methods
 
-| Method                            | Description                              |
-| --------------------------------- | ---------------------------------------- |
-| `Status begin(const Config&)`     | Initialize with configuration            |
-| `void tick(uint32_t now_ms)`      | Cooperative update, call from `loop()`   |
-| `void end()`                      | Stop and release resources               |
-| `bool isInitialized() const`      | Check if library is initialized          |
-| `const Config& getConfig() const` | Get current configuration                |
-| `uint32_t getNextTickMs() const`  | Get next scheduled tick time             |
+| Method                                     | Description                                  |
+| ------------------------------------------ | -------------------------------------------- |
+| `Status begin(const Config&)`              | Initialize with configuration                |
+| `void tick(uint32_t now_ms)`               | Cooperative update, call from `loop()`       |
+| `void end()`                               | Stop and release resources                   |
+| `Status setMode(i, mode[, params])`        | Set LED mode (temporal behavior)             |
+| `Status setColor(i, rgb)`                  | Set LED primary color                        |
+| `Status setSecondaryColor(i, rgb)`         | Set alternate color for composite modes      |
+| `Status setPreset(i, preset)`              | Set semantic preset                          |
+| `Status setDefaultPreset(i, preset)`       | Set default preset                           |
+| `Status setTemporaryPreset(i, preset, ms)` | Temporary preset then revert                 |
+| `Status setBrightness(i, level)`           | Per-LED brightness (0..255)                  |
+| `Status setGlobalBrightness(level)`        | Global brightness scale (0..255)             |
+| `Status getLedSnapshot(i, out)`            | Read current LED state                       |
 
 ## Config
 
-Configuration is injected via `Config` struct. The library **never hardcodes pins**.
-
 ```cpp
 struct Config {
-  int ledPin = -1;           // GPIO for LED (-1 = disabled)
-  int uartRxPin = -1;        // Example: UART RX pin
-  int uartTxPin = -1;        // Example: UART TX pin
-  uint32_t intervalMs = 1000; // Periodic tick interval
+  int dataPin = -1;            // WS2812 data pin
+  uint8_t ledCount = 0;        // 1..10 (max 10)
+  ColorOrder colorOrder = ColorOrder::GRB;  // GRB or RGB
+  uint8_t rmtChannel = 0;      // 0..3 for ESP32-S2/S3
+  uint8_t globalBrightness = 255;
+  uint16_t smoothStepMs = 20;  // quantized smooth updates
 };
 ```
-
-See [include/YourLibrary/Config.h](include/YourLibrary/Config.h) for full definition.
-
-### Pin Mapping
-
-The library **does not define pin defaults**. All pins are application-provided via `Config`.
-
-For convenience, examples use reference pin mappings defined in [examples/common/BoardPins.h](examples/common/BoardPins.h):
-
-| Signal    | GPIO | Note                               |
-| --------- | ---- | ---------------------------------- |
-| SDA       | 8    | I2C data line                      |
-| SCL       | 9    | I2C clock line                     |
-| SPI_MOSI  | 11   | SPI master out, slave in           |
-| SPI_SCK   | 12   | SPI serial clock                   |
-| SPI_MISO  | 13   | SPI master in, slave out           |
-| LED       | 48   | Onboard LED (48=S3, 18=S2 typical) |
-
-**These are example defaults for ESP32-S2 / ESP32-S3 reference hardware only.** Override for your board.
 
 ## Error Model
 
@@ -125,178 +94,135 @@ All fallible operations return `Status`:
 
 ```cpp
 struct Status {
-  Err code;           // Error category (OK, INVALID_CONFIG, TIMEOUT, etc.)
-  int32_t detail;     // Vendor/library-specific error code
-  const char* msg;    // Human-readable message (STATIC STRING ONLY)
+  Err code;
+  int32_t detail;
+  const char* msg;  // static string only
 };
 ```
 
-**Important:** `msg` must always point to a static string literal. Never allocate or construct strings dynamically. This ensures zero heap allocation in error paths.
+`msg` must always be a static string literal (no heap allocation).
 
-### Error Codes
+## Modes
 
-| Code                  | Meaning                                    |
-| --------------------- | ------------------------------------------ |
-| `OK`                  | Success                                    |
-| `INVALID_CONFIG`      | Invalid configuration parameter            |
-| `TIMEOUT`             | Operation timed out                        |
-| `RESOURCE_BUSY`       | Resource is busy                           |
-| `COMM_FAILURE`        | Communication or I/O error                 |
-| `NOT_INITIALIZED`     | Not initialized or not ready               |
-| `OUT_OF_MEMORY`       | Memory allocation failed                   |
-| `HARDWARE_FAULT`      | Hardware peripheral error                  |
-| `EXTERNAL_LIB_ERROR`  | Error from wrapped third-party code        |
-| `INTERNAL_ERROR`      | Internal logic error                       |
+Temporal intensity modes (color is configured separately):
 
-## Threading & Timing Model
+- Off
+- Solid
+- Dim
+- BlinkSlow
+- BlinkFast
+- DoubleBlink
+- TripleBlink
+- Beacon
+- Strobe
+- FadeIn
+- FadeOut
+- PulseSoft
+- PulseSharp
+- Breathing
+- Heartbeat
+- Throb
+- FlickerCandle
+- Glitch
+- Alternate
 
-- **Non-blocking:** `tick()` returns immediately; no delays in steady state.
-- **Single-threaded:** Call all methods from the same task/thread (typically Arduino `loop()`).
-- **Cooperative:** You control when work happens by calling `tick()`.
-- **Deterministic:** Predictable execution time; no hidden sleeps or waits.
+Use `setMode(i, mode, params)` to override period, duty, and fade timings.
 
-**ISR Safety:** Do not call library methods from ISRs. Set flags in ISRs and handle them in `tick()`.
+## Presets
 
-## Design Notes
+Semantic presets (mode + color):
 
-This library follows embedded best practices:
+- Ready -> Solid Green
+- Busy -> PulseSoft Orange
+- Warning -> BlinkSlow Amber
+- Error -> BlinkFast Red
+- Critical -> Strobe Red
+- Updating -> Breathing Cyan
+- Info -> Solid Blue
+- Maintenance -> DoubleBlink Purple
+- AlarmPolice -> Alternate Red/Blue
+- HazardAmber -> DoubleBlink Amber
 
-1. **Deterministic behavior:** No hidden delays, no unbounded loops.
-2. **Non-blocking:** All operations complete quickly or report busy.
-3. **Config injection:** Hardware pins and parameters come from `Config`, not hardcoded.
-4. **No hidden NVS:** No persistent storage side effects unless explicitly documented and opt-in.
-5. **Static error strings:** `Status.msg` is always a string literal, never heap-allocated.
-6. **No steady-state allocations:** All memory is allocated in `begin()`, none in `tick()`.
+## Backend Selection and RMT Safety
+
+Default backend is NeoPixelBus (RMT). If you see a boot-loop or log message similar to:
+`CONFLICT! driver_ng is not allowed to be used with the legacy driver`
+then rebuild with the fallback backend.
+
+Use one backend at a time:
+
+- Default (NeoPixelBus): `-DSTATUSLED_BACKEND_NEOPIXELBUS=1`
+- Fallback (ESP-IDF WS2812 driver): `-DSTATUSLED_BACKEND_IDF_WS2812=1`
+- Tests (host): `-DSTATUSLED_BACKEND_NULL=1`
+
+Avoid linking both legacy and next-gen RMT drivers in the same build. If your
+application uses `neopixelWrite()` or board RGB helpers, prefer the fallback backend.
+
+## Threading and Timing Model
+
+- **Threading Model:** Single-threaded by default. No internal tasks.
+- **Timing:** `tick()` completes in <1ms. Long operations split across calls.
+- **Resource Ownership:** LED pin and RMT channel passed via Config. No hardcoded resources.
+- **Memory:** All allocation in `begin()`. Zero allocation in `tick()`.
+- **Error Handling:** All errors returned as Status. No silent failures.
+
+## No Retransmit Behavior
+
+- Static modes do not retransmit.
+- Blink modes transmit only on on/off transitions.
+- Smooth modes transmit only on quantized brightness steps.
 
 ## Examples
 
-| Example                  | Description                                      |
-| ------------------------ | ------------------------------------------------ |
-| `00_compile_only`        | Minimal skeleton; verifies library compiles      |
-| `01_basic_bringup_cli`   | Interactive CLI for testing start/stop           |
+| Example                 | Description                                         |
+| ----------------------- | --------------------------------------------------- |
+| `00_compile_only`       | Minimal skeleton; verifies library compiles         |
+| `01_status_led_cli`     | Interactive CLI with full API access + stress test  |
 
 ### Building Examples
 
 ```bash
-# Compile-only skeleton (S3)
-pio run -e ex_compile_only_s3
+# Compile-only (S3)
+pio run -e compile_only_esp32s3
 
-# CLI example (S2)
-pio run -e ex_cli_s2 -t upload
-pio device monitor -e ex_cli_s2
+# CLI (S2)
+pio run -e cli_esp32s2 -t upload
+pio device monitor -e cli_esp32s2
 ```
 
-## Versioning Policy
+## Tests
 
-This project follows [Semantic Versioning 2.0.0](https://semver.org/):
+Host-based unit tests for timing and state transitions:
 
-- **MAJOR:** Breaking API changes
-- **MINOR:** New features, backward compatible
-- **PATCH:** Bug fixes, backward compatible
+```bash
+pio test -e native
+```
 
-### Release Checklist
+## Adding New Modes or Presets
 
-1. Update version in `library.json`
-2. Update `CHANGELOG.md` (move Unreleased to new version)
-3. Commit: `git commit -m "chore: release v1.2.3"`
-4. Tag: `git tag v1.2.3`
-5. Push: `git push && git push --tags`
+1. Add a new `Mode` or `StatusPreset` in `include/StatusLed/StatusLed.h`.
+2. Add behavior in `src/StatusLed.cpp` (`updateLed()` and presets table).
+3. Update README mode/preset list.
+4. Add or update tests in `test/native`.
 
 ## Project Structure
 
 ```
-├── include/YourLibrary/   # Public headers (library API)
-│   ├── Config.h          # Configuration struct
-│   ├── Status.h          # Error types
-│   └── YourLib.h         # Main library class
-├── src/                  # Implementation
-│   └── YourLib.cpp
-├── examples/
-│   ├── 00_compile_only/  # Minimal skeleton
-│   ├── 01_basic_bringup_cli/  # CLI demo
-│   └── common/           # Shared example utilities
-├── .github/workflows/    # CI configuration
-├── library.json          # PlatformIO library metadata
-└── platformio.ini        # Build environments
+include/StatusLed/   # Public headers (library API)
+  |-- Config.h
+  |-- Status.h
+  |-- StatusLed.h
+  |-- Version.h
+src/
+  |-- StatusLed.cpp
+examples/
+  |-- 00_compile_only/
+  |-- 01_status_led_cli/
+  |-- common/
 ```
-
-## Extending This Template
-
-This template is designed to scale across diverse embedded projects. When adding new functionality:
-
-### Device Integration Patterns
-
-**RS485/Modbus:**
-- Use transaction-based state machine (Idle → Tx → Rx → Done)
-- Implement inter-character and frame timeouts via deadlines
-- Optional: RX drain task for high-throughput scenarios
-
-**GSM Modems / AT Commands:**
-- Command queue with retry logic and per-command timeouts
-- Handle unsolicited responses (+CMT, +CREG, etc.) in tick()
-- Some commands take 30+ seconds - use deadline-based waits
-
-**High-Rate ADC:**
-- ISR writes to ring buffer (minimal work)
-- Optional processing task drains buffer
-- Document buffer size requirements in Config
-
-**Stepper Motors:**
-- Non-blocking position tracking API
-- Use hardware timers or RMT for pulse generation
-- Never block waiting for motion completion
-
-**I2C/SPI Sensors:**
-- Short transactions in tick(), avoid long bus holds
-- Implement timeout + retry with exponential backoff
-- Abstract shared bus ownership if multiple devices
-
-**SD Card Logging:**
-- Buffer writes in RAM, flush periodically or on demand
-- Optional task for background flushing
-- Handle write failures gracefully (retry, report error)
-
-### FreeRTOS Tasks (When to Use)
-
-Default: **Do not use tasks.** Implement as non-blocking tick() pattern.
-
-Use tasks only when:
-- Continuous streaming required (ADC sampling, audio)
-- Blocking I/O simplifies correctness (UART RX, sockets)
-
-When adding tasks:
-- Keep them thin adapters calling library tick()
-- Document stack size, priority, and lifecycle in Config
-- Provide both task-based AND non-blocking APIs when possible
-- Update README threading model section
-
-### Modification Checklist
-
-Before extending:
-1. Does it increase predictability? (If no, reconsider)
-2. Add Doxygen docs to all new public APIs
-3. Update README with threading/timing impacts
-4. Keep Config struct board-agnostic (no hardcoded pins)
-5. Ensure tick() remains bounded and non-blocking
-6. Add entry to CHANGELOG.md
-
-## Assumptions
-
-- Target boards have at least 4MB flash.
-- Arduino framework provides `millis()` returning `uint32_t`.
-- Examples assume onboard LED on GPIO 48 (S3) - adjust in `BoardPins.h`.
-- Single-threaded by default; tasks are opt-in via Config.
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-## License
-
-This project is licensed under the MIT License - see [LICENSE](LICENSE) for details.
 
 ## See Also
 
-- [CHANGELOG.md](CHANGELOG.md) - Version history
-- [SECURITY.md](SECURITY.md) - Security policy
-- [AGENTS.md](AGENTS.md) - AI agent guidelines
+- `CHANGELOG.md` - Version history
+- `SECURITY.md` - Security policy
+- `AGENTS.md` - AI agent guidelines

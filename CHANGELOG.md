@@ -1,4 +1,4 @@
-# Changelog
+﻿# Changelog
 
 All notable changes to this project will be documented in this file.
 
@@ -8,17 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Initial library template structure
-- `begin(Config) -> Status`, `tick(now_ms)`, `end()` API pattern
-- Status/Err type with static error messages
-- Config injection pattern (no hardcoded pins)
-- Basic CLI example (`01_basic_bringup_cli`)
-- Compile-only skeleton example (`00_compile_only`)
-- GitHub Actions CI for ESP32-S2 and ESP32-S3
-- Doxygen-style documentation in public headers
+- StatusLed library with non-blocking status LED engine
+- Mode/preset architecture with color separation and dirty-frame updates
+- NeoPixelBus backend (RMT) with configurable channel selection
+- Fallback backend option for WS2812 driver
+- Interactive CLI example with full API access and stress test
+- Host-based unit tests for timing/state transitions
 
 ### Changed
-- Nothing yet
+- Updated README and AGENTS guidelines for status LED subsystem
+- Updated platformio.ini environments and dependencies
 
 ### Deprecated
 - Nothing yet
@@ -38,5 +37,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release with template structure
 - ESP32-S2 and ESP32-S3 support
 
-[Unreleased]: https://github.com/YOUR_USERNAME/esp32-platformio-library-template/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/YOUR_USERNAME/esp32-platformio-library-template/releases/tag/v0.1.0
+[Unreleased]: https://github.com/YOUR_USERNAME/status-led/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/YOUR_USERNAME/status-led/releases/tag/v0.1.0
