@@ -17,6 +17,8 @@ pio device monitor -e cli_esp32s3_idf
 | ESP32-S3-DevKitC-1    | `cli_esp32s3_idf`  | USB CDC enabled  |
 | ESP32-S2-Saola-1      | `cli_esp32s2_idf`  | USB CDC enabled  |
 
+NeoPixelBus envs are also provided (opt-in): `cli_esp32s3_neopixelbus`, `cli_esp32s2_neopixelbus`.
+
 ## Versioning
 
 The library version is defined in `library.json`. A pre-build script generates `include/StatusLed/Version.h`.
@@ -124,6 +126,7 @@ Temporal intensity modes (color is configured separately):
 - Alternate
 
 Use `setMode(i, mode, params)` to override period, duty, and fade timings.
+Alternate toggles primary/secondary colors and is used by presets like `AlarmPolice`.
 
 ## Presets
 
@@ -159,7 +162,7 @@ avoid legacy vs NG driver conflicts.
 ## Threading and Timing Model
 
 - **Threading Model:** Single-threaded by default. No internal tasks.
-- **Timing:** `tick()` completes in <1ms. Long operations split across calls.
+- **Timing:** Designed to be bounded and fast: O(N), N ≤ 10. No blocking calls; long operations split across calls.
 - **Resource Ownership:** LED pin and RMT channel passed via Config. No hardcoded resources.
 - **Memory:** All allocation in `begin()`. Zero allocation in `tick()`.
 - **Error Handling:** All errors returned as Status. No silent failures.

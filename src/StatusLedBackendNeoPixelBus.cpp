@@ -74,7 +74,9 @@ class BackendNeoPixelBus final : public BackendBase {
   void end() override {
     if (_bus) {
       _bus->clear();
-      _bus->show();
+      if (_bus->canShow()) {
+        _bus->show();
+      }
       delete _bus;
       _bus = nullptr;
     }
@@ -85,6 +87,12 @@ class BackendNeoPixelBus final : public BackendBase {
   Status show(const RgbColor* frame, uint8_t count, ColorOrder order) override {
     if (_bus == nullptr) {
       return Status(Err::NOT_INITIALIZED, 0, "Backend not initialized");
+    }
+    if (count > _count) {
+      return Status(Err::INVALID_CONFIG, count, "count exceeds configured ledCount");
+    }
+    if (!_bus->canShow()) {
+      return Status(Err::RESOURCE_BUSY, 0, "NeoPixelBus busy");
     }
 
     // Driver order for NeoGrbFeature is GRB
