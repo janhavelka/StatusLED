@@ -181,6 +181,33 @@ static ModeParams sanitizeParams(Mode mode, ModeParams params) {
   return params;
 }
 
+static bool isValidMode(Mode mode) {
+  switch (mode) {
+    case Mode::Off:
+    case Mode::Solid:
+    case Mode::Dim:
+    case Mode::BlinkSlow:
+    case Mode::BlinkFast:
+    case Mode::DoubleBlink:
+    case Mode::TripleBlink:
+    case Mode::Beacon:
+    case Mode::Strobe:
+    case Mode::FadeIn:
+    case Mode::FadeOut:
+    case Mode::PulseSoft:
+    case Mode::PulseSharp:
+    case Mode::Breathing:
+    case Mode::Heartbeat:
+    case Mode::Throb:
+    case Mode::FlickerCandle:
+    case Mode::Glitch:
+    case Mode::Alternate:
+      return true;
+    default:
+      return false;
+  }
+}
+
 }  // namespace
 
 struct StatusLed::LedState {
@@ -532,6 +559,9 @@ Status StatusLed::setMode(uint8_t index, Mode mode, const ModeParams& params) {
   if (!indexValid(index)) {
     return setLast(Status(Err::INVALID_CONFIG, index, "index out of range"));
   }
+  if (!isValidMode(mode)) {
+    return setLast(Status(Err::INVALID_CONFIG, static_cast<int32_t>(mode), "Unknown mode"));
+  }
   _leds[index].currentPreset = StatusPreset::Off;
   return setLast(setModeInternal(index, mode, params));
 }
@@ -647,7 +677,10 @@ Status StatusLed::getLedSnapshot(uint8_t index, LedSnapshot* out) const {
   if (!_initialized) {
     return Status(Err::NOT_INITIALIZED, 0, "begin not called");
   }
-  if (!indexValid(index) || out == nullptr) {
+  if (out == nullptr) {
+    return Status(Err::INVALID_CONFIG, 0, "out must not be null");
+  }
+  if (!indexValid(index)) {
     return Status(Err::INVALID_CONFIG, index, "index out of range");
   }
 
