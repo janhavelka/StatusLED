@@ -4,19 +4,10 @@
  */
 
 #include "StatusLed/StatusLed.h"
+#include "StatusLedBackend.h"
+#include "StatusLedInternal.h"
 
 #include <stddef.h>
-#include <new>
-
-#if defined(STATUSLED_BACKEND_NEOPIXELBUS)
-#include <NeoPixelBus.h>
-#endif
-
-#if defined(STATUSLED_BACKEND_IDF_WS2812)
-extern "C" {
-#include "driver/rmt.h"
-}
-#endif
 
 namespace StatusLed {
 namespace {
@@ -141,13 +132,6 @@ static uint8_t lerpU8(uint8_t minVal, uint8_t maxVal, uint16_t pos, uint16_t spa
   return static_cast<uint8_t>(minVal + scaled);
 }
 
-static RgbColor mapColorOrder(const RgbColor& color, ColorOrder srcOrder, ColorOrder dstOrder) {
-  if (srcOrder == dstOrder) {
-    return color;
-  }
-  return RgbColor(color.g, color.r, color.b);
-}
-
 static ModeParams sanitizeParams(Mode mode, ModeParams params) {
   if (params.periodMs < 2) {
     params.periodMs = 2;
@@ -198,243 +182,6 @@ static bool isValidMode(Mode mode) {
 
 }  // namespace
 
-struct BackendBase {
-  virtual ~BackendBase() = default;
-  virtual Status begin(const Config& config) = 0;
-  virtual void end() = 0;
-  virtual bool canShow() const = 0;
-  virtual Status show(const RgbColor* frame, uint8_t count, ColorOrder order) = 0;
-};
-
-#if defined(STATUSLED_BACKEND_NEOPIXELBUS)
-namespace {
-
-class NeoPixelBusWrapperBase {
- public:
-  virtual ~NeoPixelBusWrapperBase() = default;
-  virtual void begin() = 0;
-  virtual bool canShow() const = 0;
-  virtual void show() = 0;
-  virtual void clear() = 0;
-  virtual void setPixel(uint16_t index, const ::RgbColor& color) = 0;
-};
-
-template <typename Method>
-class NeoPixelBusWrapper final : public NeoPixelBusWrapperBase {
- public:
-  NeoPixelBusWrapper(uint16_t count, uint8_t pin) : _bus(count, pin) {}
-
-  void begin() override { _bus.Begin(); }
-  bool canShow() const override { return _bus.CanShow(); }
-  void show() override { _bus.Show(); }
-  void clear() override { _bus.ClearTo(::RgbColor(0)); }
-  void setPixel(uint16_t index, const ::RgbColor& color) override { _bus.SetPixelColor(index, color); }
-
- private:
-  NeoPixelBus<NeoGrbFeature, Method> _bus;
-};
-
-class BackendNeoPixelBus final : public BackendBase {
- public:
-  Status begin(const Config& config) override {
-    end();
-    _pin = static_cast<uint8_t>(config.dataPin);
-
-    switch (config.rmtChannel) {
-      case 0:
-        _bus = new (std::nothrow) NeoPixelBusWrapper<NeoEsp32Rmt0Ws2812xMethod>(_count, _pin);
-        break;
-      case 1:
-        _bus = new (std::nothrow) NeoPixelBusWrapper<NeoEsp32Rmt1Ws2812xMethod>(_count, _pin);
-        break;
-      case 2:
-        _bus = new (std::nothrow) NeoPixelBusWrapper<NeoEsp32Rmt2Ws2812xMethod>(_count, _pin);
-        break;
-      case 3:
-        _bus = new (std::nothrow) NeoPixelBusWrapper<NeoEsp32Rmt3Ws2812xMethod>(_count, _pin);
-        break;
-      default:
-        return Status(Err::INVALID_CONFIG, config.rmtChannel, "Invalid RMT channel");
-    }
-
-    if (_bus == nullptr) {
-      return Status(Err::OUT_OF_MEMORY, 0, "NeoPixelBus alloc failed");
-    }
-
-    _bus->begin();
-    return Ok();
-  }
-
-  void end() override {
-    if (_bus) {
-      _bus->clear();
-      _bus->show();
-      delete _bus;
-      _bus = nullptr;
-    }
-  }
-
-  bool canShow() const override { return _bus ? _bus->canShow() : true; }
-
-  Status show(const RgbColor* frame, uint8_t count, ColorOrder order) override {
-    if (_bus == nullptr) {
-      return Status(Err::NOT_INITIALIZED, 0, "Backend not initialized");
-    }
-
-    // Driver order for NeoGrbFeature is GRB
-    const ColorOrder driverOrder = ColorOrder::GRB;
-
-    for (uint8_t i = 0; i < count; ++i) {
-      const RgbColor mapped = mapColorOrder(frame[i], order, driverOrder);
-      _bus->setPixel(i, ::RgbColor(mapped.r, mapped.g, mapped.b));
-    }
-    _bus->show();
-    return Ok();
-  }
-
- private:
-  NeoPixelBusWrapperBase* _bus = nullptr;
-  uint8_t _count = 0;
-  uint8_t _pin = 0;
-};
-
-}  // namespace
-#endif  // STATUSLED_BACKEND_NEOPIXELBUS
-
-#if defined(STATUSLED_BACKEND_IDF_WS2812)
-namespace {
-
-class BackendIdfWs2812 final : public BackendBase {
- public:
-  Status begin(const Config& config) override {
-    end();
-
-    _channel = static_cast<rmt_channel_t>(config.rmtChannel);
-
-    rmt_config_t rmt_cfg = RMT_DEFAULT_CONFIG_TX(static_cast<gpio_num_t>(config.dataPin), _channel);
-    rmt_cfg.clk_div = kRmtClkDiv;
-    rmt_cfg.tx_config.idle_level = RMT_IDLE_LEVEL_LOW;
-    rmt_cfg.tx_config.idle_output_en = true;
-    rmt_cfg.tx_config.carrier_en = false;
-
-    esp_err_t err = rmt_config(&rmt_cfg);
-    if (err != ESP_OK) {
-      return Status(Err::HARDWARE_FAULT, err, "rmt_config failed");
-    }
-
-    err = rmt_driver_install(_channel, 0, 0);
-    if (err != ESP_OK) {
-      return Status(Err::HARDWARE_FAULT, err, "rmt_driver_install failed");
-    }
-
-    _installed = true;
-    return Ok();
-  }
-
-  void end() override {
-    if (_installed) {
-      rmt_driver_uninstall(_channel);
-      _installed = false;
-    }
-  }
-
-  bool canShow() const override {
-    if (!_installed) {
-      return false;
-    }
-    return rmt_wait_tx_done(_channel, 0) == ESP_OK;
-  }
-
-  Status show(const RgbColor* frame, uint8_t count, ColorOrder order) override {
-    if (!_installed) {
-      return Status(Err::NOT_INITIALIZED, 0, "Backend not initialized");
-    }
-
-    if (rmt_wait_tx_done(_channel, 0) == ESP_ERR_TIMEOUT) {
-      return Status(Err::RESOURCE_BUSY, 0, "rmt busy");
-    }
-
-    const size_t itemCount = buildItems(frame, count, order);
-    if (itemCount == 0) {
-      return Status(Err::INTERNAL_ERROR, 0, "item build failed");
-    }
-
-    const esp_err_t err = rmt_write_items(_channel, _items, static_cast<int>(itemCount), false);
-    if (err != ESP_OK) {
-      return Status(Err::HARDWARE_FAULT, err, "rmt_write_items failed");
-    }
-    return Ok();
-  }
-
- private:
-  static constexpr uint8_t kRmtClkDiv = 2;          // 80MHz / 2 = 40MHz
-  static constexpr uint16_t kT0H = 16;              // 0.4us
-  static constexpr uint16_t kT0L = 34;              // 0.85us
-  static constexpr uint16_t kT1H = 32;              // 0.8us
-  static constexpr uint16_t kT1L = 18;              // 0.45us
-  static constexpr uint16_t kResetTicks = 3200;     // 80us
-  static constexpr uint16_t kBitsPerLed = 24;
-  static constexpr uint16_t kMaxItems = (kMaxLeds * kBitsPerLed) + 1;
-
-  size_t buildItems(const RgbColor* frame, uint8_t count, ColorOrder order) {
-    if (count == 0 || count > kMaxLeds) {
-      return 0;
-    }
-
-    size_t idx = 0;
-    for (uint8_t i = 0; i < count; ++i) {
-      const RgbColor mapped = mapColorOrder(frame[i], ColorOrder::RGB, order);
-      encodeByte(mapped.r, idx);
-      encodeByte(mapped.g, idx);
-      encodeByte(mapped.b, idx);
-    }
-
-    if (idx >= kMaxItems) {
-      return 0;
-    }
-
-    rmt_item32_t& reset = _items[idx++];
-    reset.level0 = 0;
-    reset.duration0 = kResetTicks;
-    reset.level1 = 0;
-    reset.duration1 = 0;
-
-    return idx;
-  }
-
-  void encodeByte(uint8_t value, size_t& idx) {
-    for (int bit = 7; bit >= 0; --bit) {
-      const bool isOne = (value >> bit) & 0x1;
-      rmt_item32_t& item = _items[idx++];
-      item.level0 = 1;
-      item.duration0 = isOne ? kT1H : kT0H;
-      item.level1 = 0;
-      item.duration1 = isOne ? kT1L : kT0L;
-    }
-  }
-
-  rmt_item32_t _items[kMaxItems]{};
-  rmt_channel_t _channel = RMT_CHANNEL_0;
-  bool _installed = false;
-};
-
-}  // namespace
-#endif  // STATUSLED_BACKEND_IDF_WS2812
-
-#if defined(STATUSLED_BACKEND_NULL)
-namespace {
-
-class BackendNull final : public BackendBase {
- public:
-  Status begin(const Config&) override { return Ok(); }
-  void end() override {}
-  bool canShow() const override { return true; }
-  Status show(const RgbColor*, uint8_t, ColorOrder) override { return Ok(); }
-};
-
-}  // namespace
-#endif  // STATUSLED_BACKEND_NULL
-
 Status StatusLed::begin(const Config& config) {
   if (config.dataPin < 0) {
     return setLast(Status(Err::INVALID_CONFIG, 0, "dataPin must be >= 0"));
@@ -461,21 +208,14 @@ Status StatusLed::begin(const Config& config) {
     _frame[i] = kColorOff;
   }
 
-#if defined(STATUSLED_BACKEND_NEOPIXELBUS)
-  _backend = new (std::nothrow) BackendNeoPixelBus();
-#elif defined(STATUSLED_BACKEND_IDF_WS2812)
-  _backend = new (std::nothrow) BackendIdfWs2812();
-#elif defined(STATUSLED_BACKEND_NULL)
-  _backend = new (std::nothrow) BackendNull();
-#endif
-
+  _backend = createBackend();
   if (_backend == nullptr) {
     return setLast(Status(Err::OUT_OF_MEMORY, 0, "backend alloc failed"));
   }
 
   const Status st = _backend->begin(_config);
   if (!st.ok()) {
-    delete _backend;
+    destroyBackend(_backend);
     _backend = nullptr;
     return setLast(st);
   }
@@ -488,7 +228,7 @@ Status StatusLed::begin(const Config& config) {
 void StatusLed::end() {
   if (_backend) {
     _backend->end();
-    delete _backend;
+    destroyBackend(_backend);
     _backend = nullptr;
   }
   _initialized = false;
