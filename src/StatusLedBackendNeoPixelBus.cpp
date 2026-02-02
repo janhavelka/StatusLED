@@ -6,7 +6,7 @@
 #include "StatusLedBackend.h"
 #include "StatusLedInternal.h"
 
-#if defined(STATUSLED_BACKEND_NEOPIXELBUS)
+#if STATUSLED_BACKEND_NEOPIXELBUS
 
 #include <NeoPixelBus.h>
 #include <new>

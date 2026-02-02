@@ -116,6 +116,7 @@ void end();                          // Cleanup
 - Provide a fallback backend if driver conflicts are observed
 - Never ship a configuration that can boot-loop or abort at runtime
 - Default backend is IDF WS2812; NeoPixelBus is opt-in per env
+- Set exactly one `STATUSLED_BACKEND_*` macro to `1` (others `0`)
 - Backend code must not pull conflicting driver APIs into the binary
 
 ---

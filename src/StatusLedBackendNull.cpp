@@ -5,7 +5,7 @@
 
 #include "StatusLedBackend.h"
 
-#if defined(STATUSLED_BACKEND_NULL)
+#if STATUSLED_BACKEND_NULL
 
 #include <new>
 

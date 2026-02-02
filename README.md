@@ -151,6 +151,8 @@ Choose a backend by selecting the matching PlatformIO environment:
 - **NeoPixelBus backend (opt-in):** `cli_esp32s3_neopixelbus`, `cli_esp32s2_neopixelbus`
 - **Host tests:** `native` (uses `STATUSLED_BACKEND_NULL`)
 
+Set exactly one backend macro to `1` (others `0`). The provided environments already do this.
+
 If your application uses `neopixelWrite()` or board RGB helpers, prefer the IDF backend to
 avoid legacy vs NG driver conflicts.
 

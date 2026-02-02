@@ -6,7 +6,7 @@
 #include "StatusLedBackend.h"
 #include "StatusLedInternal.h"
 
-#if defined(STATUSLED_BACKEND_IDF_WS2812)
+#if STATUSLED_BACKEND_IDF_WS2812
 
 #include <new>
 
