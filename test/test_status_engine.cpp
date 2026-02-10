@@ -96,13 +96,82 @@ static void test_fade_in_oneshot() {
   leds.end();
 }
 
+static void test_blink_fast_wraparound_does_not_freeze() {
+  StatusLed::StatusLed leds;
+  const StatusLed::Status st = leds.begin(make_config());
+  TEST_ASSERT_TRUE(st.ok());
+
+  const StatusLed::ModeParams defaults = StatusLed::StatusLed::getModeDefaults(StatusLed::Mode::BlinkFast);
+  leds.setMode(0, StatusLed::Mode::BlinkFast, defaults);
+
+  StatusLed::LedSnapshot snap;
+  const uint32_t near_wrap = 0xFFFFFFFFu - defaults.onMs;
+  leds.tick(near_wrap);
+  TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+  TEST_ASSERT_EQUAL_UINT8(255, snap.intensity);
+
+  leds.tick(0);
+  TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+  TEST_ASSERT_EQUAL_UINT8(0, snap.intensity);
+
+  leds.tick(static_cast<uint32_t>(defaults.onMs + 1));
+  TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+  TEST_ASSERT_EQUAL_UINT8(255, snap.intensity);
+
+  leds.end();
+}
+
+static void test_fade_out_decreases_from_full_intensity() {
+  StatusLed::StatusLed leds;
+  const StatusLed::Status st = leds.begin(make_config());
+  TEST_ASSERT_TRUE(st.ok());
+
+  const StatusLed::ModeParams defaults = StatusLed::StatusLed::getModeDefaults(StatusLed::Mode::FadeOut);
+  leds.setMode(0, StatusLed::Mode::FadeOut, defaults);
+
+  StatusLed::LedSnapshot snap;
+  leds.tick(0);
+  TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+  TEST_ASSERT_EQUAL_UINT8(255, snap.intensity);
+
+  leds.tick(20);
+  TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+  TEST_ASSERT_GREATER_THAN_UINT8(200, snap.intensity);
+  TEST_ASSERT_LESS_THAN_UINT8(255, snap.intensity);
+
+  leds.tick(defaults.fallMs + 1);
+  TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+  TEST_ASSERT_EQUAL_UINT8(0, snap.intensity);
+
+  leds.end();
+}
+
+static void test_begin_rejects_invalid_color_order_and_pin() {
+  StatusLed::StatusLed leds;
+  StatusLed::Config cfg = make_config();
+  cfg.colorOrder = static_cast<StatusLed::ColorOrder>(99);
+
+  StatusLed::Status st = leds.begin(cfg);
+  TEST_ASSERT_FALSE(st.ok());
+  TEST_ASSERT_EQUAL_UINT16(static_cast<uint16_t>(StatusLed::Err::INVALID_CONFIG), static_cast<uint16_t>(st.code));
+
+  cfg = make_config();
+  cfg.dataPin = 300;
+  st = leds.begin(cfg);
+  TEST_ASSERT_FALSE(st.ok());
+  TEST_ASSERT_EQUAL_UINT16(static_cast<uint16_t>(StatusLed::Err::INVALID_CONFIG), static_cast<uint16_t>(st.code));
+}
+
 void setUp() {}
 void tearDown() {}
 
-int main(int argc, char** argv) {
+int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_blink_fast_toggles);
   RUN_TEST(test_temporary_preset_reverts);
   RUN_TEST(test_fade_in_oneshot);
+  RUN_TEST(test_blink_fast_wraparound_does_not_freeze);
+  RUN_TEST(test_fade_out_decreases_from_full_intensity);
+  RUN_TEST(test_begin_rejects_invalid_color_order_and_pin);
   return UNITY_END();
 }

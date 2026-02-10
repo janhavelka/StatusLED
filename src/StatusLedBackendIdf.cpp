@@ -11,6 +11,7 @@
 #include <new>
 
 extern "C" {
+#include "driver/gpio.h"
 #include "driver/rmt.h"
 }
 
@@ -22,9 +23,17 @@ class BackendIdfWs2812 final : public BackendBase {
   Status begin(const Config& config) override {
     end();
 
-    _channel = static_cast<rmt_channel_t>(config.rmtChannel);
+    if (config.dataPin < 0) {
+      return Status(Err::INVALID_CONFIG, config.dataPin, "dataPin must be >= 0");
+    }
 
-    rmt_config_t rmt_cfg = RMT_DEFAULT_CONFIG_TX(static_cast<gpio_num_t>(config.dataPin), _channel);
+    _channel = static_cast<rmt_channel_t>(config.rmtChannel);
+    const gpio_num_t gpio = static_cast<gpio_num_t>(config.dataPin);
+    if (!GPIO_IS_VALID_OUTPUT_GPIO(gpio)) {
+      return Status(Err::INVALID_CONFIG, config.dataPin, "dataPin is not a valid output GPIO");
+    }
+
+    rmt_config_t rmt_cfg = RMT_DEFAULT_CONFIG_TX(gpio, _channel);
     rmt_cfg.clk_div = kRmtClkDiv;
     rmt_cfg.tx_config.idle_level = RMT_IDLE_LEVEL_LOW;
     rmt_cfg.tx_config.idle_output_en = true;
@@ -55,16 +64,26 @@ class BackendIdfWs2812 final : public BackendBase {
     if (!_installed) {
       return false;
     }
-    return rmt_wait_tx_done(_channel, 0) == ESP_OK;
+    return rmt_wait_tx_done(_channel, 0) != ESP_ERR_TIMEOUT;
   }
 
   Status show(const RgbColor* frame, uint8_t count, ColorOrder order) override {
     if (!_installed) {
       return Status(Err::NOT_INITIALIZED, 0, "Backend not initialized");
     }
+    if (frame == nullptr) {
+      return Status(Err::INVALID_CONFIG, 0, "frame must not be null");
+    }
+    if (count == 0 || count > kMaxLeds) {
+      return Status(Err::INVALID_CONFIG, count, "count out of range");
+    }
 
-    if (rmt_wait_tx_done(_channel, 0) == ESP_ERR_TIMEOUT) {
+    const esp_err_t waitErr = rmt_wait_tx_done(_channel, 0);
+    if (waitErr == ESP_ERR_TIMEOUT) {
       return Status(Err::RESOURCE_BUSY, 0, "rmt busy");
+    }
+    if (waitErr != ESP_OK) {
+      return Status(Err::HARDWARE_FAULT, waitErr, "rmt_wait_tx_done failed");
     }
 
     const size_t itemCount = buildItems(frame, count, order);
@@ -91,16 +110,16 @@ class BackendIdfWs2812 final : public BackendBase {
   static constexpr uint16_t kMaxItems = (kMaxLeds * kBitsPerLed) + 1;
 
   size_t buildItems(const RgbColor* frame, uint8_t count, ColorOrder order) {
-    if (count == 0 || count > kMaxLeds) {
+    if (frame == nullptr || count == 0 || count > kMaxLeds) {
       return 0;
     }
 
     size_t idx = 0;
     for (uint8_t i = 0; i < count; ++i) {
       const RgbColor mapped = mapColorOrder(frame[i], ColorOrder::RGB, order);
-      encodeByte(mapped.r, idx);
-      encodeByte(mapped.g, idx);
-      encodeByte(mapped.b, idx);
+      if (!encodeByte(mapped.r, idx) || !encodeByte(mapped.g, idx) || !encodeByte(mapped.b, idx)) {
+        return 0;
+      }
     }
 
     if (idx >= kMaxItems) {
@@ -116,8 +135,11 @@ class BackendIdfWs2812 final : public BackendBase {
     return idx;
   }
 
-  void encodeByte(uint8_t value, size_t& idx) {
+  bool encodeByte(uint8_t value, size_t& idx) {
     for (int bit = 7; bit >= 0; --bit) {
+      if (idx >= kMaxItems) {
+        return false;
+      }
       const bool isOne = (value >> bit) & 0x1;
       rmt_item32_t& item = _items[idx++];
       item.level0 = 1;
@@ -125,6 +147,7 @@ class BackendIdfWs2812 final : public BackendBase {
       item.level1 = 0;
       item.duration1 = isOne ? kT1L : kT0L;
     }
+    return true;
   }
 
   rmt_item32_t _items[kMaxItems]{};

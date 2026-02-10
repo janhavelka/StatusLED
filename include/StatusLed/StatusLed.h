@@ -292,6 +292,7 @@ class StatusLed {
     uint8_t phase = 0;
     bool useAlt = false;
     uint32_t nextUpdateMs = 0;
+    bool updateScheduled = true;
     uint32_t phaseEndMs = 0;
     uint32_t modeStartMs = 0;
     StatusPreset currentPreset = StatusPreset::Off;
@@ -330,6 +331,7 @@ class StatusLed {
   bool _initialized = false;
   Status _lastStatus{};
   uint32_t _lastTickMs = 0;
+  bool _timeSynced = false;
   bool _frameDirty = false;
 
   LedState _leds[kMaxLedCount]{};

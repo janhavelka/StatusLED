@@ -28,7 +28,8 @@ enum class ColorOrder : uint8_t {
  *       example code, not in the library.
  */
 struct Config {
-  /// @brief GPIO pin for WS2812 data output. Set to -1 to disable.
+  /// @brief GPIO pin for WS2812 data output.
+  /// @note Defaults to -1 (unconfigured). Must be set to a valid pin before begin().
   /// @note Application-provided. Library does not define pin defaults.
   int dataPin = -1;
 

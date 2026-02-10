@@ -43,6 +43,12 @@ class BackendNeoPixelBus final : public BackendBase {
  public:
   Status begin(const Config& config) override {
     end();
+    if (config.dataPin < 0 || config.dataPin > 255) {
+      return Status(Err::INVALID_CONFIG, config.dataPin, "dataPin out of range");
+    }
+    if (config.ledCount == 0) {
+      return Status(Err::INVALID_CONFIG, 0, "ledCount must be > 0");
+    }
     _pin = static_cast<uint8_t>(config.dataPin);
     _count = config.ledCount;
 
@@ -82,11 +88,17 @@ class BackendNeoPixelBus final : public BackendBase {
     }
   }
 
-  bool canShow() const override { return _bus ? _bus->canShow() : true; }
+  bool canShow() const override { return _bus ? _bus->canShow() : false; }
 
   Status show(const RgbColor* frame, uint8_t count, ColorOrder order) override {
     if (_bus == nullptr) {
       return Status(Err::NOT_INITIALIZED, 0, "Backend not initialized");
+    }
+    if (frame == nullptr) {
+      return Status(Err::INVALID_CONFIG, 0, "frame must not be null");
+    }
+    if (count == 0) {
+      return Status(Err::INVALID_CONFIG, 0, "count must be > 0");
     }
     if (count > _count) {
       return Status(Err::INVALID_CONFIG, count, "count exceeds configured ledCount");
