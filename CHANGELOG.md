@@ -1,4 +1,4 @@
-﻿# Changelog
+# Changelog
 
 All notable changes to this project will be documented in this file.
 
@@ -21,6 +21,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Nothing yet
+
+### Security
+- Nothing yet
+
+## [1.0.2] - 2026-02-11
+
+### Added
+- Added `scripts/check_text_integrity.py` to fail fast on UTF-8 BOM in tracked text files.
+- Added CI enforcement for text-integrity checks in `.github/workflows/ci.yml`.
+
+### Changed
+- Nothing yet
+
+### Deprecated
+- Nothing yet
+
+### Removed
+- Nothing yet
+
+### Fixed
+- Removed UTF-8 BOM from `library.json` and tracked source/header files to restore reliable PlatformIO manifest parsing from `lib_deps`.
 
 ### Security
 - Nothing yet
@@ -74,6 +95,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 - Nothing yet
 
-[Unreleased]: https://github.com/janhavelka/StatusLED/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/janhavelka/StatusLED/compare/v1.0.2...HEAD
+[1.0.2]: https://github.com/janhavelka/StatusLED/releases/tag/v1.0.2
 [1.0.1]: https://github.com/janhavelka/StatusLED/releases/tag/v1.0.1
 [1.0.0]: https://github.com/janhavelka/StatusLED/releases/tag/v1.0.0

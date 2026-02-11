@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file main.cpp
  * @brief Interactive CLI example for StatusLed.
  *

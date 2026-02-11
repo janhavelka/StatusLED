@@ -1,4 +1,4 @@
-﻿# AGENTS.md - Production Status LED Engineering Guidelines
+# AGENTS.md - Production Status LED Engineering Guidelines
 
 ## Role
 You are a professional embedded software engineer building a production-grade status LED subsystem for ESP32.

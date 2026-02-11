@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file Config.h
  * @brief Configuration structure for StatusLed.
  *

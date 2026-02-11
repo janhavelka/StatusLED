@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file StatusLed.h
  * @brief Status LED subsystem for WS2812-class LEDs.
  *

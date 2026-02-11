@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file StatusLed.cpp
  * @brief Implementation of StatusLed.
  */

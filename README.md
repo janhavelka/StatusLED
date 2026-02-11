@@ -1,4 +1,4 @@
-﻿# StatusLED
+# StatusLED
 
 Production-grade status LED subsystem for ESP32-S2/S3 (WS2812/NeoPixel-class) using Arduino + PlatformIO.
 

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file Version.h
  * @brief Library version information.
  * 

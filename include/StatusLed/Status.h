@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file Status.h
  * @brief Error handling types for StatusLed.
  *
