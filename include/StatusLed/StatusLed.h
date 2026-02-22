@@ -58,7 +58,8 @@ enum class Mode : uint8_t {
   Throb,
   FlickerCandle,
   Glitch,
-  Alternate
+  Alternate,
+  SOS
 };
 
 /**
@@ -77,7 +78,10 @@ enum class StatusPreset : uint8_t {
   Info,
   Maintenance,
   AlarmPolice,
-  HazardAmber
+  HazardAmber,
+  Success,
+  Connecting,
+  LowBattery
 };
 
 /**
@@ -146,8 +150,15 @@ class StatusLed {
   /// @brief Maximum number of LEDs supported by the library.
   static constexpr uint8_t kMaxLedCount = 10;
 
+  /// @brief Default constructor.
+  StatusLed() = default;
+
   /// @brief Destructor releases backend resources.
   ~StatusLed() { end(); }
+
+  /// @brief Non-copyable (owns backend pointer).
+  StatusLed(const StatusLed&) = delete;
+  StatusLed& operator=(const StatusLed&) = delete;
 
   /**
    * @brief Initialize the library with the given configuration.
@@ -255,6 +266,60 @@ class StatusLed {
   Status setGlobalBrightness(uint8_t level);
 
   /**
+   * @brief Turn all LEDs off and reset state.
+   *
+   * Clears all modes, presets, temporary overrides, and colors.
+   * LEDs remain initialized; call end() to release resources.
+   *
+   * @return Status Ok on success, or NOT_INITIALIZED if begin() not called.
+   */
+  Status clear();
+
+  /**
+   * @brief Cancel a temporary preset and revert to previous state.
+   * @param index LED index (0..ledCount-1).
+   * @return Status Ok on success, or INVALID_CONFIG on bad index.
+   * @note Safe to call when no temporary preset is active (returns Ok).
+   */
+  Status clearTemporary(uint8_t index);
+
+  /**
+   * @brief Apply a preset to all configured LEDs.
+   * @param preset Preset definition.
+   * @return Status Ok on success, or first error encountered.
+   * @note Cancels any active temporary presets.
+   */
+  Status setAllPreset(StatusPreset preset);
+
+  /**
+   * @brief Apply a mode to all configured LEDs using default parameters.
+   * @param mode Desired mode.
+   * @return Status Ok on success, or first error encountered.
+   */
+  Status setAllMode(Mode mode);
+
+  /**
+   * @brief Apply a mode to all configured LEDs with custom parameters.
+   * @param mode Desired mode.
+   * @param params Custom parameters for the mode.
+   * @return Status Ok on success, or first error encountered.
+   */
+  Status setAllMode(Mode mode, const ModeParams& params);
+
+  /**
+   * @brief Apply a color to all configured LEDs.
+   * @param color RGB color.
+   * @return Status Ok on success, or NOT_INITIALIZED if begin() not called.
+   */
+  Status setAllColor(const RgbColor& color);
+
+  /**
+   * @brief Force output retransmission on next tick().
+   * @note Useful after suspected data line noise or external interference.
+   */
+  void forceRefresh();
+
+  /**
    * @brief Get a snapshot of LED state.
    * @param index LED index (0..ledCount-1).
    * @param out Snapshot output.
@@ -311,7 +376,7 @@ class StatusLed {
     uint8_t resumeBrightness = 255;
     StatusPreset resumePreset = StatusPreset::Off;
 
-    uint32_t lfsr = 0xABCDEu;
+    uint32_t lfsr = 0xACE1u;
   };
 
   Status setModeInternal(uint8_t index, Mode mode, const ModeParams& params);

@@ -5,25 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.1.0] - 2026-02-22
 
 ### Added
-- Nothing yet
-
-### Changed
-- Nothing yet
-
-### Deprecated
-- Nothing yet
-
-### Removed
-- Nothing yet
+- `clear()` method to turn all LEDs off and reset state in a single call.
+- `clearTemporary(index)` method to cancel a temporary preset early and revert.
+- `setAllPreset(preset)` method to apply a preset to all configured LEDs.
+- `setAllMode(mode)` / `setAllMode(mode, params)` methods to apply mode to all LEDs.
+- `setAllColor(color)` method to apply color to all configured LEDs.
+- `forceRefresh()` method to force output retransmission on next tick.
+- `Mode::SOS` — Morse code SOS distress pattern (...---...).
+- `StatusPreset::Success` — DoubleBlink Green for operation-complete indication.
+- `StatusPreset::Connecting` — PulseSoft Blue for IoT/WiFi connecting states.
+- `StatusPreset::LowBattery` — Beacon Red for sparse low-battery indication.
+- Deleted copy/move constructors and assignment operators to prevent double-free.
+- 21 new unit tests covering guards, edge cases, new modes, presets, and methods.
+- CLI commands: `clear`, `cleartemp`, `allpreset`, `allmode`, `allcolor`, `refresh`.
 
 ### Fixed
-- Nothing yet
-
-### Security
-- Nothing yet
+- LFSR zero-lockup: added guard to prevent FlickerCandle/Glitch modes from freezing if LFSR state reaches zero.
+- LFSR seed now properly initialized within 16-bit polynomial range (was 20-bit, causing unpredictable initial sequence).
+- Added bounds check in `refreshLedOutput(index)` single-argument overload to prevent out-of-bounds array access.
+- IDF backend now blanks all LEDs (sends zeros) before driver uninstall in `end()`, preventing LEDs stuck in last state.
 
 ## [1.0.2] - 2026-02-11
 
@@ -95,7 +98,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 - Nothing yet
 
-[Unreleased]: https://github.com/janhavelka/StatusLED/compare/v1.0.2...HEAD
+[1.1.0]: https://github.com/janhavelka/StatusLED/releases/tag/v1.1.0
 [1.0.2]: https://github.com/janhavelka/StatusLED/releases/tag/v1.0.2
 [1.0.1]: https://github.com/janhavelka/StatusLED/releases/tag/v1.0.1
 [1.0.0]: https://github.com/janhavelka/StatusLED/releases/tag/v1.0.0

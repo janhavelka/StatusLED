@@ -50,13 +50,23 @@ class BackendIdfWs2812 final : public BackendBase {
     }
 
     _installed = true;
+    _count = config.ledCount;
     return Ok();
   }
 
   void end() override {
     if (_installed) {
+      // Best-effort: blank LEDs before releasing the driver
+      if (_count > 0 && rmt_wait_tx_done(_channel, 10) == ESP_OK) {
+        RgbColor blank[kMaxLeds]{};
+        const size_t itemCount = buildItems(blank, _count, ColorOrder::GRB);
+        if (itemCount > 0) {
+          rmt_write_items(_channel, _items, static_cast<int>(itemCount), true);
+        }
+      }
       rmt_driver_uninstall(_channel);
       _installed = false;
+      _count = 0;
     }
   }
 
@@ -153,6 +163,7 @@ class BackendIdfWs2812 final : public BackendBase {
   rmt_item32_t _items[kMaxItems]{};
   rmt_channel_t _channel = RMT_CHANNEL_0;
   bool _installed = false;
+  uint8_t _count = 0;
 };
 
 }  // namespace

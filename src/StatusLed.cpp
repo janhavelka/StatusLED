@@ -65,6 +65,21 @@ static constexpr PatternStep kPatternPolice[] = {
   {400, 0, false},
 };
 
+static constexpr PatternStep kPatternSOS[] = {
+  // S: ...
+  {100, 255, false}, {100, 0, false},
+  {100, 255, false}, {100, 0, false},
+  {100, 255, false}, {300, 0, false},
+  // O: ---
+  {300, 255, false}, {100, 0, false},
+  {300, 255, false}, {100, 0, false},
+  {300, 255, false}, {300, 0, false},
+  // S: ...
+  {100, 255, false}, {100, 0, false},
+  {100, 255, false}, {100, 0, false},
+  {100, 255, false}, {700, 0, false},
+};
+
 struct PresetDef {
   StatusPreset preset;
   Mode mode;
@@ -81,6 +96,7 @@ static constexpr RgbColor kColorRed(255, 0, 0);
 static constexpr RgbColor kColorCyan(0, 255, 255);
 static constexpr RgbColor kColorBlue(0, 0, 255);
 static constexpr RgbColor kColorPurple(128, 0, 255);
+static constexpr RgbColor kColorWhite(255, 255, 255);
 
 static constexpr PresetDef kPresets[] = {
   {StatusPreset::Off, Mode::Off, kColorOff, kColorOff, false},
@@ -94,6 +110,9 @@ static constexpr PresetDef kPresets[] = {
   {StatusPreset::Maintenance, Mode::DoubleBlink, kColorPurple, kColorOff, false},
   {StatusPreset::AlarmPolice, Mode::Alternate, kColorRed, kColorBlue, true},
   {StatusPreset::HazardAmber, Mode::DoubleBlink, kColorAmber, kColorOff, false},
+  {StatusPreset::Success, Mode::DoubleBlink, kColorGreen, kColorOff, false},
+  {StatusPreset::Connecting, Mode::PulseSoft, kColorBlue, kColorOff, false},
+  {StatusPreset::LowBattery, Mode::Beacon, kColorRed, kColorOff, false},
 };
 
 static const PresetDef* findPreset(StatusPreset preset) {
@@ -196,6 +215,7 @@ static bool isValidMode(Mode mode) {
     case Mode::FlickerCandle:
     case Mode::Glitch:
     case Mode::Alternate:
+    case Mode::SOS:
       return true;
     default:
       return false;
@@ -230,7 +250,8 @@ Status StatusLed::begin(const Config& config) {
 
   for (uint8_t i = 0; i < kMaxLeds; ++i) {
     _leds[i] = LedState();
-    _leds[i].lfsr = 0xABCDEu ^ (static_cast<uint32_t>(i) * 7919u);
+    const uint32_t seed = (0xACE1u ^ (static_cast<uint32_t>(i) * 179u)) & 0xFFFFu;
+    _leds[i].lfsr = seed ? seed : 0xACE1u;
     _frame[i] = kColorOff;
   }
 
@@ -301,6 +322,9 @@ ModeParams StatusLed::getModeDefaults(Mode mode) {
       params.periodMs = 4000;
       params.minLevel = 0;
       params.maxLevel = 255;
+      break;
+    case Mode::SOS:
+      params.periodMs = 4200;
       break;
     default:
       break;
@@ -437,6 +461,118 @@ Status StatusLed::setGlobalBrightness(uint8_t level) {
   return setLast(Ok());
 }
 
+Status StatusLed::clear() {
+  if (!_initialized) {
+    return setLast(Status(Err::NOT_INITIALIZED, 0, "begin not called"));
+  }
+
+  const uint8_t count = safeLedCount(_config.ledCount);
+  for (uint8_t i = 0; i < count; ++i) {
+    LedState& led = _leds[i];
+    led.tempActive = false;
+    led.tempPending = false;
+    led.currentPreset = StatusPreset::Off;
+    led.defaultPreset = StatusPreset::Off;
+    led.color = kColorOff;
+    led.altColor = kColorOff;
+    setModeInternal(i, Mode::Off, ModeParams{});
+    refreshLedOutput(i);
+  }
+  return setLast(Ok());
+}
+
+Status StatusLed::clearTemporary(uint8_t index) {
+  if (!_initialized) {
+    return setLast(Status(Err::NOT_INITIALIZED, 0, "begin not called"));
+  }
+  if (!indexValid(index)) {
+    return setLast(Status(Err::INVALID_CONFIG, index, "index out of range"));
+  }
+
+  LedState& led = _leds[index];
+
+  if (led.tempPending) {
+    led.tempPending = false;
+    return setLast(Ok());
+  }
+
+  if (!led.tempActive) {
+    return setLast(Ok());
+  }
+
+  led.tempActive = false;
+  led.mode = led.resumeMode;
+  led.params = led.resumeParams;
+  led.color = led.resumeColor;
+  led.altColor = led.resumeAltColor;
+  led.brightness = led.resumeBrightness;
+  led.currentPreset = led.resumePreset;
+  led.phase = 0;
+  led.useAlt = false;
+  led.modeStartMs = _lastTickMs;
+  led.nextUpdateMs = _lastTickMs;
+  led.updateScheduled = true;
+  led.phaseEndMs = _lastTickMs;
+  refreshLedOutput(index);
+  return setLast(Ok());
+}
+
+Status StatusLed::setAllPreset(StatusPreset preset) {
+  if (!_initialized) {
+    return setLast(Status(Err::NOT_INITIALIZED, 0, "begin not called"));
+  }
+  if (findPreset(preset) == nullptr) {
+    return setLast(Status(Err::INVALID_CONFIG, static_cast<int32_t>(preset), "Unknown preset"));
+  }
+
+  const uint8_t count = safeLedCount(_config.ledCount);
+  for (uint8_t i = 0; i < count; ++i) {
+    _leds[i].tempActive = false;
+    _leds[i].tempPending = false;
+    applyPresetInternal(i, preset);
+  }
+  return setLast(Ok());
+}
+
+Status StatusLed::setAllMode(Mode mode) {
+  return setAllMode(mode, getModeDefaults(mode));
+}
+
+Status StatusLed::setAllMode(Mode mode, const ModeParams& params) {
+  if (!_initialized) {
+    return setLast(Status(Err::NOT_INITIALIZED, 0, "begin not called"));
+  }
+  if (!isValidMode(mode)) {
+    return setLast(Status(Err::INVALID_CONFIG, static_cast<int32_t>(mode), "Unknown mode"));
+  }
+
+  const uint8_t count = safeLedCount(_config.ledCount);
+  for (uint8_t i = 0; i < count; ++i) {
+    _leds[i].currentPreset = StatusPreset::Off;
+    setModeInternal(i, mode, params);
+  }
+  return setLast(Ok());
+}
+
+Status StatusLed::setAllColor(const RgbColor& color) {
+  if (!_initialized) {
+    return setLast(Status(Err::NOT_INITIALIZED, 0, "begin not called"));
+  }
+
+  const uint8_t count = safeLedCount(_config.ledCount);
+  for (uint8_t i = 0; i < count; ++i) {
+    _leds[i].currentPreset = StatusPreset::Off;
+    setColorInternal(i, color, false);
+  }
+  return setLast(Ok());
+}
+
+void StatusLed::forceRefresh() {
+  if (_initialized) {
+    _frameDirty = true;
+  }
+}
+
 Status StatusLed::getLedSnapshot(uint8_t index, LedSnapshot* out) const {
   if (!_initialized) {
     return Status(Err::NOT_INITIALIZED, 0, "begin not called");
@@ -514,6 +650,7 @@ Status StatusLed::applyPresetInternal(uint8_t index, StatusPreset preset) {
 }
 
 void StatusLed::refreshLedOutput(uint8_t index) {
+  if (index >= kMaxLeds || index >= _config.ledCount) return;
   const LedState& led = _leds[index];
   refreshLedOutput(index, led.intensity, led.useAlt);
 }
@@ -669,6 +806,14 @@ void StatusLed::updateLed(uint8_t index, uint32_t now_ms) {
       led.nextUpdateMs = now_ms + step.durationMs;
       led.updateScheduled = true;
     } break;
+    case Mode::SOS: {
+      const PatternStep& step = kPatternSOS[led.phase % (sizeof(kPatternSOS) / sizeof(kPatternSOS[0]))];
+      led.intensity = step.intensity;
+      led.useAlt = step.useAlt;
+      led.phase = static_cast<uint8_t>(led.phase + 1);
+      led.nextUpdateMs = now_ms + step.durationMs;
+      led.updateScheduled = true;
+    } break;
     case Mode::FadeIn: {
       const uint32_t elapsed = now_ms - led.modeStartMs;
       if (elapsed >= led.params.riseMs) {
@@ -722,6 +867,7 @@ void StatusLed::updateLed(uint8_t index, uint32_t now_ms) {
     } break;
     case Mode::FlickerCandle:
     case Mode::Glitch: {
+      if (led.lfsr == 0) led.lfsr = 0xACE1u;
       led.lfsr = (led.lfsr >> 1) ^ (-(static_cast<int32_t>(led.lfsr & 1u)) & 0xB400u);
       const uint8_t rand8 = static_cast<uint8_t>(led.lfsr & 0xFFu);
       if (led.mode == Mode::FlickerCandle) {

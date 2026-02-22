@@ -72,6 +72,12 @@ void loop() {
 | `Status setTemporaryPreset(i, preset, ms)` | Temporary preset then revert                 |
 | `Status setBrightness(i, level)`           | Per-LED brightness (0..255)                  |
 | `Status setGlobalBrightness(level)`        | Global brightness scale (0..255)             |
+| `Status clear()`                           | Turn all LEDs off and reset state            |
+| `Status clearTemporary(i)`                 | Cancel temporary preset, revert to previous  |
+| `Status setAllPreset(preset)`              | Apply a preset to all configured LEDs        |
+| `Status setAllMode(mode[, params])`         | Apply mode to all configured LEDs            |
+| `Status setAllColor(rgb)`                   | Apply color to all configured LEDs           |
+| `void forceRefresh()`                      | Force retransmit on next tick()              |
 | `Status getLedSnapshot(i, out)`            | Read current LED state                       |
 
 ## Config
@@ -124,9 +130,11 @@ Temporal intensity modes (color is configured separately):
 - FlickerCandle
 - Glitch
 - Alternate
+- SOS
 
 Use `setMode(i, mode, params)` to override period, duty, and fade timings.
 Alternate toggles primary/secondary colors and is used by presets like `AlarmPolice`.
+SOS plays the Morse code distress pattern (...---...).
 
 ## Presets
 
@@ -142,6 +150,9 @@ Semantic presets (mode + color):
 - Maintenance -> DoubleBlink Purple
 - AlarmPolice -> Alternate Red/Blue
 - HazardAmber -> DoubleBlink Amber
+- Success -> DoubleBlink Green
+- Connecting -> PulseSoft Blue
+- LowBattery -> Beacon Red
 
 ## Backend Selection and RMT Safety
 

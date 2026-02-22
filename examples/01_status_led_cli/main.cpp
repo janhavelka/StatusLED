@@ -62,6 +62,7 @@ static const ModeNameMap kModes[] = {
   {"flicker", StatusLed::Mode::FlickerCandle},
   {"glitch", StatusLed::Mode::Glitch},
   {"alternate", StatusLed::Mode::Alternate},
+  {"sos", StatusLed::Mode::SOS},
 };
 
 static const PresetNameMap kPresets[] = {
@@ -76,6 +77,9 @@ static const PresetNameMap kPresets[] = {
   {"maintenance", StatusLed::StatusPreset::Maintenance},
   {"police", StatusLed::StatusPreset::AlarmPolice},
   {"hazard", StatusLed::StatusPreset::HazardAmber},
+  {"success", StatusLed::StatusPreset::Success},
+  {"connecting", StatusLed::StatusPreset::Connecting},
+  {"lowbat", StatusLed::StatusPreset::LowBattery},
 };
 
 static const char* mode_name(StatusLed::Mode mode) {
@@ -199,6 +203,12 @@ static void print_help() {
   Serial.println(F("  temp <i> <preset> <duration_ms>"));
   Serial.println(F("  bright <i> <level>"));
   Serial.println(F("  gbright <level>"));
+  Serial.println(F("  clear"));
+  Serial.println(F("  cleartemp <i>"));
+  Serial.println(F("  allpreset <preset>"));
+  Serial.println(F("  allmode <mode>"));
+  Serial.println(F("  allcolor <r> <g> <b>"));
+  Serial.println(F("  refresh"));
   Serial.println(F("  stress on [period_ms]"));
   Serial.println(F("  stress off"));
   Serial.println();
@@ -559,6 +569,56 @@ static void handle_command(char* line) {
     if (parse_u32(argv[1], &level)) {
       g_leds.setGlobalBrightness(static_cast<uint8_t>(level));
     }
+    return;
+  }
+
+  if (strcmp(argv[0], "clear") == 0) {
+    g_leds.clear();
+    LOGI("Cleared.");
+    return;
+  }
+
+  if (strcmp(argv[0], "cleartemp") == 0 && argc >= 2) {
+    uint32_t idx = 0;
+    if (parse_u32(argv[1], &idx)) {
+      g_leds.clearTemporary(static_cast<uint8_t>(idx));
+    }
+    return;
+  }
+
+  if (strcmp(argv[0], "allpreset") == 0 && argc >= 2) {
+    StatusLed::StatusPreset preset;
+    if (!parse_preset(argv[1], &preset)) {
+      LOGE("invalid preset");
+      return;
+    }
+    g_leds.setAllPreset(preset);
+    return;
+  }
+
+  if (strcmp(argv[0], "allmode") == 0 && argc >= 2) {
+    StatusLed::Mode mode;
+    if (!parse_mode(argv[1], &mode)) {
+      LOGE("invalid mode");
+      return;
+    }
+    g_leds.setAllMode(mode);
+    return;
+  }
+
+  if (strcmp(argv[0], "allcolor") == 0 && argc >= 4) {
+    uint32_t r = 0;
+    uint32_t g = 0;
+    uint32_t b = 0;
+    if (parse_u32(argv[1], &r) && parse_u32(argv[2], &g) && parse_u32(argv[3], &b)) {
+      g_leds.setAllColor(StatusLed::RgbColor(r, g, b));
+    }
+    return;
+  }
+
+  if (strcmp(argv[0], "refresh") == 0) {
+    g_leds.forceRefresh();
+    LOGI("Refresh queued.");
     return;
   }
 
