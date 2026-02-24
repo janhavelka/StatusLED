@@ -115,7 +115,8 @@ void end();                          // Cleanup
 - Avoid mixing legacy and next-gen RMT drivers in the same build
 - Provide a fallback backend if driver conflicts are observed
 - Never ship a configuration that can boot-loop or abort at runtime
-- Default backend is IDF WS2812; NeoPixelBus is opt-in per env
+- IDF 4.4 envs use `STATUSLED_BACKEND_IDF_WS2812`; IDF 5.x envs use `STATUSLED_BACKEND_IDF5_WS2812`
+- NeoPixelBus is opt-in per env
 - Set exactly one `STATUSLED_BACKEND_*` macro to `1` (others `0`)
 - Backend code must not pull conflicting driver APIs into the binary
 

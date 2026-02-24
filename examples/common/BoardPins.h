@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file BoardPins.h
  * @brief Example default pin mapping for ESP32-S2 / ESP32-S3 reference hardware.
  *
@@ -25,6 +25,6 @@ namespace pins {
 static constexpr int LED_DATA = 47;
 
 /// @brief Default LED count for examples.
-static constexpr uint8_t LED_COUNT = 3;
+static constexpr uint8_t LED_COUNT = 1;
 
 }  // namespace pins

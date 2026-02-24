@@ -12,10 +12,12 @@ pio device monitor -e cli_esp32s3_idf
 
 ## Supported Targets
 
-| Board                 | Environment       | Notes            |
-| --------------------- | ----------------- | ---------------- |
-| ESP32-S3-DevKitC-1    | `cli_esp32s3_idf`  | USB CDC enabled  |
-| ESP32-S2-Saola-1      | `cli_esp32s2_idf`  | USB CDC enabled  |
+| Board              | Environment         | Backend                | Notes           |
+| ------------------ | ------------------- | ---------------------- | --------------- |
+| ESP32-S3-DevKitC-1 | `cli_esp32s3_idf`   | Legacy IDF RMT (4.4.x) | USB CDC enabled |
+| ESP32-S2-Saola-1   | `cli_esp32s2_idf`   | Legacy IDF RMT (4.4.x) | USB CDC enabled |
+| ESP32-S3-DevKitC-1 | `cli_esp32s3_idf5`  | IDF5 RMT v2            | USB CDC enabled |
+| ESP32-S2-Saola-1   | `cli_esp32s2_idf5`  | IDF5 RMT v2            | USB CDC enabled |
 
 NeoPixelBus envs are also provided (opt-in): `cli_esp32s3_neopixelbus`, `cli_esp32s2_neopixelbus`.
 
@@ -87,7 +89,7 @@ struct Config {
   int dataPin = -1;            // WS2812 data pin
   uint8_t ledCount = 0;        // 1..10 (max 10)
   ColorOrder colorOrder = ColorOrder::GRB;  // GRB or RGB
-  uint8_t rmtChannel = 0;      // 0..3 for ESP32-S2/S3
+  uint8_t rmtChannel = 0;      // 0..3 for legacy backends; ignored by IDF5 backend
   uint8_t globalBrightness = 255;
   uint16_t smoothStepMs = 20;  // quantized smooth updates
 };
@@ -157,24 +159,26 @@ Semantic presets (mode + color):
 ## Backend Selection and RMT Safety
 
 Arduino-ESP32 v3.x can abort at boot if legacy RMT and next-gen RMT drivers are
-linked together. To reduce this risk, **IDF WS2812 is the recommended default**.
+linked together. StatusLED keeps backend selection compile-time only so one
+driver family is linked into a build.
 
 Choose a backend by selecting the matching PlatformIO environment:
 
-- **IDF backend (recommended):** `cli_esp32s3_idf`, `cli_esp32s2_idf`
+- **IDF backend (legacy RMT / IDF 4.4):** `cli_esp32s3_idf`, `cli_esp32s2_idf` (`STATUSLED_BACKEND_IDF_WS2812=1`)
+- **IDF5 backend (RMT v2 / IDF 5.x):** `cli_esp32s3_idf5`, `cli_esp32s2_idf5` (`STATUSLED_BACKEND_IDF5_WS2812=1`)
 - **NeoPixelBus backend (opt-in):** `cli_esp32s3_neopixelbus`, `cli_esp32s2_neopixelbus`
 - **Host tests:** `native` (uses `STATUSLED_BACKEND_NULL`)
 
 Set exactly one backend macro to `1` (others `0`). The provided environments already do this.
 
-If your application uses `neopixelWrite()` or board RGB helpers, prefer the IDF backend to
-avoid legacy vs NG driver conflicts.
+`rmtChannel` from `Config` is used by legacy IDF and NeoPixelBus backends.
+The IDF5 backend allocates an RMT TX channel dynamically and ignores `rmtChannel`.
 
 ## Threading and Timing Model
 
 - **Threading Model:** Single-threaded by default. No internal tasks.
-- **Timing:** Designed to be bounded and fast: O(N), N ≤ 10. No blocking calls; long operations split across calls.
-- **Resource Ownership:** LED pin and RMT channel passed via Config. No hardcoded resources.
+- **Timing:** `tick()` completes in <1ms. Long operations split across calls.
+- **Resource Ownership:** LED pin is passed via Config. `rmtChannel` is used by legacy backends; IDF5 backend allocates channel handles dynamically. No hardcoded resources.
 - **Memory:** All allocation in `begin()`. Zero allocation in `tick()`.
 - **Error Handling:** All errors returned as Status. No silent failures.
 
@@ -196,6 +200,18 @@ avoid legacy vs NG driver conflicts.
 # CLI (S2, IDF backend)
 pio run -e cli_esp32s2_idf -t upload
 pio device monitor -e cli_esp32s2_idf
+
+# CLI (S2, IDF5 backend)
+pio run -e cli_esp32s2_idf5 -t upload
+pio device monitor -e cli_esp32s2_idf5
+```
+
+Windows note for IDF5 envs: if package extraction fails due long paths, enable
+long paths in Windows or use a short PlatformIO core dir, for example:
+
+```powershell
+$env:PLATFORMIO_CORE_DIR = "C:\p"
+python -m platformio run -e cli_esp32s3_idf5
 ```
 
 ## Tests

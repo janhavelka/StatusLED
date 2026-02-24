@@ -13,6 +13,10 @@ namespace StatusLed {
 #define STATUSLED_BACKEND_IDF_WS2812 0
 #endif
 
+#ifndef STATUSLED_BACKEND_IDF5_WS2812
+#define STATUSLED_BACKEND_IDF5_WS2812 0
+#endif
+
 #ifndef STATUSLED_BACKEND_NEOPIXELBUS
 #define STATUSLED_BACKEND_NEOPIXELBUS 0
 #endif
@@ -24,6 +28,9 @@ namespace StatusLed {
 #if (STATUSLED_BACKEND_IDF_WS2812 != 0 && STATUSLED_BACKEND_IDF_WS2812 != 1)
 #error "STATUSLED_BACKEND_IDF_WS2812 must be 0 or 1"
 #endif
+#if (STATUSLED_BACKEND_IDF5_WS2812 != 0 && STATUSLED_BACKEND_IDF5_WS2812 != 1)
+#error "STATUSLED_BACKEND_IDF5_WS2812 must be 0 or 1"
+#endif
 #if (STATUSLED_BACKEND_NEOPIXELBUS != 0 && STATUSLED_BACKEND_NEOPIXELBUS != 1)
 #error "STATUSLED_BACKEND_NEOPIXELBUS must be 0 or 1"
 #endif
@@ -31,11 +38,11 @@ namespace StatusLed {
 #error "STATUSLED_BACKEND_NULL must be 0 or 1"
 #endif
 
-#if (STATUSLED_BACKEND_IDF_WS2812 + STATUSLED_BACKEND_NEOPIXELBUS + STATUSLED_BACKEND_NULL) == 0
+#if (STATUSLED_BACKEND_IDF_WS2812 + STATUSLED_BACKEND_IDF5_WS2812 + STATUSLED_BACKEND_NEOPIXELBUS + STATUSLED_BACKEND_NULL) == 0
 #error "Select exactly one backend: set one STATUSLED_BACKEND_* macro to 1"
 #endif
 
-#if (STATUSLED_BACKEND_IDF_WS2812 + STATUSLED_BACKEND_NEOPIXELBUS + STATUSLED_BACKEND_NULL) > 1
+#if (STATUSLED_BACKEND_IDF_WS2812 + STATUSLED_BACKEND_IDF5_WS2812 + STATUSLED_BACKEND_NEOPIXELBUS + STATUSLED_BACKEND_NULL) > 1
 #error "Multiple backends selected. Set only one STATUSLED_BACKEND_* macro to 1"
 #endif
 
@@ -43,11 +50,14 @@ namespace StatusLed {
 enum class BackendType : uint8_t {
   IdfWs2812 = 0,
   NeoPixelBus = 1,
-  Null = 2
+  Null = 2,
+  Idf5Ws2812 = 3
 };
 
 #if STATUSLED_BACKEND_IDF_WS2812
 static constexpr BackendType kSelectedBackend = BackendType::IdfWs2812;
+#elif STATUSLED_BACKEND_IDF5_WS2812
+static constexpr BackendType kSelectedBackend = BackendType::Idf5Ws2812;
 #elif STATUSLED_BACKEND_NEOPIXELBUS
 static constexpr BackendType kSelectedBackend = BackendType::NeoPixelBus;
 #else
