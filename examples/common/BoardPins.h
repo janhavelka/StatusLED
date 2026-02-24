@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file BoardPins.h
  * @brief Example default pin mapping for ESP32-S2 / ESP32-S3 reference hardware.
  *
