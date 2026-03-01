@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Improved output readability by limiting emphasis to operationally important statuses.
+- IDF5 WS2812 backend no longer polls `rmt_tx_wait_all_done(..., 0)` in normal transmit flow, preventing repeated `flush timeout` log spam under high-frequency updates (e.g., CLI stress mode).
 
 ## [1.2.0] - 2026-02-24
 
