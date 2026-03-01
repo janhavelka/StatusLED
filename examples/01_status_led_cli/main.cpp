@@ -32,6 +32,14 @@ static StressState g_stress;
 static char g_line[128];
 static uint8_t g_line_len = 0;
 
+static void print_help_section(const char* title) {
+  Serial.printf("%s[%s]%s\n", LOG_COLOR_GREEN, title, LOG_COLOR_RESET);
+}
+
+static void print_help_item(const char* cmd, const char* desc) {
+  Serial.printf("  %s%-42s%s - %s\n", LOG_COLOR_CYAN, cmd, LOG_COLOR_RESET, desc);
+}
+
 struct ModeNameMap {
   const char* name;
   StatusLed::Mode mode;
@@ -175,7 +183,7 @@ static char* read_line() {
 
 static void print_help() {
   Serial.println();
-  Serial.println(F("=== StatusLed CLI ==="));
+  Serial.printf("%s=== StatusLed CLI Help ===%s\n", LOG_COLOR_CYAN, LOG_COLOR_RESET);
   Serial.print(F("Version: "));
   Serial.println(StatusLed::VERSION);
   Serial.print(F("Built:   "));
@@ -185,32 +193,39 @@ static void print_help() {
   Serial.print(F(" ("));
   Serial.print(StatusLed::GIT_STATUS);
   Serial.println(F(")"));
-  Serial.println(F("Commands:"));
-  Serial.println(F("  help"));
-  Serial.println(F("  begin [pin] [count] [grb|rgb] [rmt] [smooth_ms]"));
-  Serial.println(F("  end"));
-  Serial.println(F("  status [index]"));
-  Serial.println(F("  config"));
-  Serial.println(F("  last"));
-  Serial.println(F("  list_modes"));
-  Serial.println(F("  list_presets"));
-  Serial.println(F("  mode <i> <mode>"));
-  Serial.println(F("  modep <i> <mode> <period> <on> <rise> <fall> <min> <max>"));
-  Serial.println(F("  color <i> <r> <g> <b>"));
-  Serial.println(F("  alt <i> <r> <g> <b>"));
-  Serial.println(F("  preset <i> <preset>"));
-  Serial.println(F("  default <i> <preset>"));
-  Serial.println(F("  temp <i> <preset> <duration_ms>"));
-  Serial.println(F("  bright <i> <level>"));
-  Serial.println(F("  gbright <level>"));
-  Serial.println(F("  clear"));
-  Serial.println(F("  cleartemp <i>"));
-  Serial.println(F("  allpreset <preset>"));
-  Serial.println(F("  allmode <mode>"));
-  Serial.println(F("  allcolor <r> <g> <b>"));
-  Serial.println(F("  refresh"));
-  Serial.println(F("  stress on [period_ms]"));
-  Serial.println(F("  stress off"));
+  Serial.println();
+  print_help_section("Common");
+  print_help_item("help", "Show this help");
+  Serial.println();
+  print_help_section("Lifecycle");
+  print_help_item("begin [pin] [count] [grb|rgb] [rmt] [smooth_ms]", "Initialize driver");
+  print_help_item("end", "Stop driver");
+  print_help_item("stress on [period_ms]", "Enable mixed stress mode");
+  print_help_item("stress off", "Disable stress mode");
+  Serial.println();
+  print_help_section("Inspect");
+  print_help_item("status [index]", "Show LED snapshot (one or all)");
+  print_help_item("config", "Print active configuration");
+  print_help_item("last", "Print last driver status");
+  print_help_item("list_modes", "List mode names");
+  print_help_item("list_presets", "List preset names");
+  Serial.println();
+  print_help_section("Control");
+  print_help_item("mode <i> <mode>", "Set mode");
+  print_help_item("modep <i> <mode> <period> <on> <rise> <fall> <min> <max>", "Set mode with params");
+  print_help_item("color <i> <r> <g> <b>", "Set primary color");
+  print_help_item("alt <i> <r> <g> <b>", "Set secondary color");
+  print_help_item("preset <i> <preset>", "Set current preset");
+  print_help_item("default <i> <preset>", "Set default preset");
+  print_help_item("temp <i> <preset> <duration_ms>", "Set temporary preset");
+  print_help_item("bright <i> <level>", "Set LED brightness");
+  print_help_item("gbright <level>", "Set global brightness");
+  print_help_item("clear", "Clear all LEDs");
+  print_help_item("cleartemp <i>", "Clear temporary state");
+  print_help_item("allpreset <preset>", "Set preset on all LEDs");
+  print_help_item("allmode <mode>", "Set mode on all LEDs");
+  print_help_item("allcolor <r> <g> <b>", "Set color on all LEDs");
+  print_help_item("refresh", "Force refresh");
   Serial.println();
 }
 
@@ -220,7 +235,10 @@ static void print_config() {
   Serial.print(F(" ledCount="));
   Serial.print(g_config.ledCount);
   Serial.print(F(" order="));
-  Serial.print(g_config.colorOrder == StatusLed::ColorOrder::GRB ? "GRB" : "RGB");
+  Serial.printf("%s%s%s",
+                LOG_COLOR_CYAN,
+                g_config.colorOrder == StatusLed::ColorOrder::GRB ? "GRB" : "RGB",
+                LOG_COLOR_RESET);
   Serial.print(F(" rmt="));
   Serial.print(g_config.rmtChannel);
   Serial.print(F(" smoothStepMs="));
@@ -414,6 +432,7 @@ static void handle_command(char* line) {
   if (strcmp(argv[0], "status") == 0) {
     if (!g_initialized) {
       LOGI("Not running.");
+      Serial.printf("  Driver: %sNOT_RUNNING%s\n", LOG_COLOR_YELLOW, LOG_COLOR_RESET);
       return;
     }
     if (argc > 1) {
@@ -437,11 +456,17 @@ static void handle_command(char* line) {
   if (strcmp(argv[0], "last") == 0) {
     const StatusLed::Status st = g_leds.getLastStatus();
     Serial.print(F("last: code="));
+    Serial.print(st.ok() ? LOG_COLOR_GREEN : LOG_COLOR_RED);
     Serial.print(static_cast<int>(st.code));
+    Serial.print(LOG_COLOR_RESET);
     Serial.print(F(" detail="));
     Serial.print(st.detail);
     Serial.print(F(" msg="));
-    Serial.println(st.msg);
+    if (st.msg && st.msg[0] != '\0') {
+      Serial.printf("%s%s%s\n", LOG_COLOR_YELLOW, st.msg, LOG_COLOR_RESET);
+    } else {
+      Serial.println("-");
+    }
     return;
   }
 
@@ -634,9 +659,11 @@ static void handle_command(char* line) {
         }
       }
       LOGI("Stress test enabled. period=%u ms", g_stress.periodMs);
+      Serial.printf("  Stress: %sON%s\n", LOG_COLOR_GREEN, LOG_COLOR_RESET);
     } else if (strcmp(argv[1], "off") == 0) {
       g_stress.active = false;
       LOGI("Stress test disabled.");
+      Serial.printf("  Stress: %sOFF%s\n", LOG_COLOR_YELLOW, LOG_COLOR_RESET);
     }
     return;
   }
