@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Doxygen configuration for generated API documentation.
+- README instructions for local API documentation generation.
+- `Status::Ok()`, `Status::Error(...)`, free `Error(...)`, and
+  `Status::inProgress()` helpers.
+- `config()` and `lastStatus()` aliases for shorter public accessors.
+- CLI `version` and `info` diagnostics for build metadata, backend, config,
+  and last status.
+
+### Changed
+- README now explicitly calls out the `status-led` PlatformIO package name.
+
 ## [1.3.0] - 2026-03-01
 
 ### Changed

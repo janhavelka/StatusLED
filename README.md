@@ -2,6 +2,8 @@
 
 Production-grade status LED subsystem for ESP32-S2/S3 (WS2812/NeoPixel-class) using Arduino + PlatformIO.
 
+PlatformIO package name: `status-led`.
+
 ## Quickstart
 
 ```bash
@@ -81,6 +83,8 @@ void loop() {
 | `Status setAllColor(rgb)`                   | Apply color to all configured LEDs           |
 | `void forceRefresh()`                      | Force retransmit on next tick()              |
 | `Status getLedSnapshot(i, out)`            | Read current LED state                       |
+| `const Config& config()`                   | Read accepted runtime configuration          |
+| `Status lastStatus()`                      | Read last public-operation status            |
 
 ## Config
 
@@ -108,6 +112,8 @@ struct Status {
 ```
 
 `msg` must always be a static string literal (no heap allocation).
+Use `status.ok()` for success and `status.inProgress()` for transient `RESOURCE_BUSY`.
+Both `Status::Ok()` / `Status::Error(...)` and free `Ok()` / `Error(...)` helpers are available.
 
 ## Modes
 
@@ -194,6 +200,8 @@ The IDF5 backend allocates an RMT TX channel dynamically and ignores `rmtChannel
 | ----------------------- | --------------------------------------------------- |
 | `01_status_led_cli`     | Interactive CLI with full API access + stress test  |
 
+Useful CLI diagnostics: `help`, `version`, `info`, `status`, `config`, and `last`.
+
 ### Building Examples
 
 ```bash
@@ -224,6 +232,16 @@ pio test -e native
 
 Requires a host C++ compiler (GCC/Clang). On Windows, install MinGW-w64
 (e.g., WinLibs) and ensure `gcc`/`g++` are in `PATH` (restart shell after install).
+
+## API Documentation
+
+Doxygen configuration is provided in `Doxyfile`. Generate local API docs with:
+
+```bash
+doxygen Doxyfile
+```
+
+Generated HTML is written under `docs/doxygen/html`.
 
 ## Adding New Modes or Presets
 
