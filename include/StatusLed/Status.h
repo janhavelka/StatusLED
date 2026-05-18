@@ -52,13 +52,39 @@ struct Status {
   /// @brief Constructor with all fields.
   constexpr Status(Err c, int32_t d, const char* m) : code(c), detail(d), msg(m) {}
 
+  /// @brief Create a success Status.
+  /// @return Status with Err::OK.
+  static constexpr Status Ok() { return Status(Err::OK, 0, ""); }
+
+  /// @brief Create an error Status.
+  /// @param c Error category.
+  /// @param d Vendor/library-specific detail value.
+  /// @param m Static message string.
+  /// @return Status with supplied error fields.
+  static constexpr Status Error(Err c, int32_t d = 0, const char* m = "") {
+    return Status(c, d, m);
+  }
+
   /// @brief Check if operation succeeded.
   /// @return true if code == Err::OK
   constexpr bool ok() const { return code == Err::OK; }
+
+  /// @brief Check whether the operation should be retried later.
+  /// @return true for transient RESOURCE_BUSY results.
+  constexpr bool inProgress() const { return code == Err::RESOURCE_BUSY; }
 };
 
 /// @brief Create a success Status.
 /// @return Status with Err::OK
-constexpr Status Ok() { return Status(Err::OK, 0, ""); }
+constexpr Status Ok() { return Status::Ok(); }
+
+/// @brief Create an error Status.
+/// @param code Error category.
+/// @param detail Vendor/library-specific detail value.
+/// @param msg Static message string.
+/// @return Status with supplied error fields.
+constexpr Status Error(Err code, int32_t detail = 0, const char* msg = "") {
+  return Status::Error(code, detail, msg);
+}
 
 }  // namespace StatusLed

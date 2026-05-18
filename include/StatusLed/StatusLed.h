@@ -23,16 +23,34 @@ struct BackendBase;
  * @brief Simple RGB color.
  */
 struct RgbColor {
+  /// @brief Red channel intensity (0..255).
   uint8_t r = 0;
+  /// @brief Green channel intensity (0..255).
   uint8_t g = 0;
+  /// @brief Blue channel intensity (0..255).
   uint8_t b = 0;
 
+  /// @brief Construct black/off color.
   constexpr RgbColor() = default;
+
+  /**
+   * @brief Construct an RGB color from channel intensities.
+   * @param red Red channel intensity (0..255).
+   * @param green Green channel intensity (0..255).
+   * @param blue Blue channel intensity (0..255).
+   */
   constexpr RgbColor(uint8_t red, uint8_t green, uint8_t blue) : r(red), g(green), b(blue) {}
 
+  /// @brief Compare RGB channel equality.
+  /// @param other Color to compare.
+  /// @return true when all three channels match.
   constexpr bool operator==(const RgbColor& other) const {
     return r == other.r && g == other.g && b == other.b;
   }
+
+  /// @brief Compare RGB channel inequality.
+  /// @param other Color to compare.
+  /// @return true when any channel differs.
   constexpr bool operator!=(const RgbColor& other) const { return !(*this == other); }
 };
 
@@ -111,14 +129,23 @@ struct ModeParams {
  * @brief Snapshot of a single LED runtime state.
  */
 struct LedSnapshot {
+  /// @brief Current temporal mode.
   Mode mode = Mode::Off;
+  /// @brief Current semantic preset.
   StatusPreset preset = StatusPreset::Off;
+  /// @brief Preset restored when idle/default behavior applies.
   StatusPreset defaultPreset = StatusPreset::Off;
+  /// @brief Primary RGB color.
   RgbColor color{};
+  /// @brief Secondary RGB color for alternate/composite modes.
   RgbColor altColor{};
+  /// @brief Per-LED brightness (0..255).
   uint8_t brightness = 255;
+  /// @brief Current computed mode intensity (0..255).
   uint8_t intensity = 0;
+  /// @brief True while a temporary preset is active.
   bool tempActive = false;
+  /// @brief Milliseconds remaining for the active temporary preset.
   uint32_t tempRemainingMs = 0;
 };
 
@@ -335,15 +362,27 @@ class StatusLed {
   static ModeParams getModeDefaults(Mode mode);
 
   /// @brief Check if library is currently initialized.
+  /// @return true after successful begin() and before end().
   bool isInitialized() const { return _initialized; }
 
   /// @brief Get current configuration.
+  /// @return Configuration accepted by the most recent successful begin().
   const Config& getConfig() const { return _config; }
 
+  /// @brief Alias for getConfig(), matching shorter sibling-library accessors.
+  /// @return Configuration accepted by the most recent successful begin().
+  const Config& config() const { return getConfig(); }
+
   /// @brief Get last error status recorded by the library.
+  /// @return Last status from a fallible public operation.
   Status getLastStatus() const { return _lastStatus; }
 
+  /// @brief Alias for getLastStatus().
+  /// @return Last status from a fallible public operation.
+  Status lastStatus() const { return getLastStatus(); }
+
   /// @brief Get number of LEDs configured.
+  /// @return Configured LED count, or the last accepted count after end().
   uint8_t ledCount() const { return _config.ledCount; }
 
  private:

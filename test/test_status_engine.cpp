@@ -162,6 +162,32 @@ static void test_begin_rejects_invalid_color_order_and_pin() {
   TEST_ASSERT_EQUAL_UINT16(static_cast<uint16_t>(StatusLed::Err::INVALID_CONFIG), static_cast<uint16_t>(st.code));
 }
 
+static void test_status_helpers_and_accessor_aliases() {
+  const StatusLed::Status ok = StatusLed::Status::Ok();
+  TEST_ASSERT_TRUE(ok.ok());
+  TEST_ASSERT_FALSE(ok.inProgress());
+  TEST_ASSERT_TRUE(StatusLed::Ok().ok());
+
+  const StatusLed::Status busy =
+      StatusLed::Status::Error(StatusLed::Err::RESOURCE_BUSY, 12, "busy");
+  TEST_ASSERT_FALSE(busy.ok());
+  TEST_ASSERT_TRUE(busy.inProgress());
+
+  const StatusLed::Status invalid =
+      StatusLed::Error(StatusLed::Err::INVALID_CONFIG, 7, "bad");
+  TEST_ASSERT_FALSE(invalid.ok());
+  TEST_ASSERT_FALSE(invalid.inProgress());
+  TEST_ASSERT_EQUAL_UINT16(static_cast<uint16_t>(StatusLed::Err::INVALID_CONFIG),
+                           static_cast<uint16_t>(invalid.code));
+  TEST_ASSERT_EQUAL_INT32(7, invalid.detail);
+
+  StatusLed::StatusLed leds;
+  TEST_ASSERT_TRUE(leds.begin(make_config()).ok());
+  TEST_ASSERT_EQUAL_UINT8(1, leds.config().ledCount);
+  TEST_ASSERT_TRUE(leds.lastStatus().ok());
+  leds.end();
+}
+
 static void test_methods_reject_when_not_initialized() {
   StatusLed::StatusLed leds;
 
@@ -592,6 +618,7 @@ int main(int, char**) {
   RUN_TEST(test_blink_fast_wraparound_does_not_freeze);
   RUN_TEST(test_fade_out_decreases_from_full_intensity);
   RUN_TEST(test_begin_rejects_invalid_color_order_and_pin);
+  RUN_TEST(test_status_helpers_and_accessor_aliases);
   RUN_TEST(test_methods_reject_when_not_initialized);
   RUN_TEST(test_index_out_of_range_rejected);
   RUN_TEST(test_clear_resets_all_state);

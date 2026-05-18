@@ -108,6 +108,21 @@ static const char* preset_name(StatusLed::StatusPreset preset) {
   return "unknown";
 }
 
+static const char* backend_name(StatusLed::BackendType backend) {
+  switch (backend) {
+    case StatusLed::BackendType::IdfWs2812:
+      return "idf-ws2812";
+    case StatusLed::BackendType::Idf5Ws2812:
+      return "idf5-ws2812";
+    case StatusLed::BackendType::NeoPixelBus:
+      return "neopixelbus";
+    case StatusLed::BackendType::Null:
+      return "null";
+    default:
+      return "unknown";
+  }
+}
+
 static bool parse_mode(const char* s, StatusLed::Mode* out) {
   for (size_t i = 0; i < sizeof(kModes) / sizeof(kModes[0]); ++i) {
     if (strcmp(kModes[i].name, s) == 0) {
@@ -138,6 +153,32 @@ static bool parse_u32(const char* s, uint32_t* out) {
     return false;
   }
   *out = static_cast<uint32_t>(val);
+  return true;
+}
+
+static bool parse_u8_range(const char* s, uint8_t* out, uint8_t maxValue) {
+  uint32_t value = 0;
+  if (!parse_u32(s, &value) || value > maxValue) {
+    return false;
+  }
+  *out = static_cast<uint8_t>(value);
+  return true;
+}
+
+static bool parse_u16_range(const char* s, uint16_t* out, uint16_t minValue, uint16_t maxValue) {
+  uint32_t value = 0;
+  if (!parse_u32(s, &value) || value < minValue || value > maxValue) {
+    return false;
+  }
+  *out = static_cast<uint16_t>(value);
+  return true;
+}
+
+static bool log_status(const StatusLed::Status& st) {
+  if (!st.ok()) {
+    LOGE("command failed: %s", st.msg);
+    return false;
+  }
   return true;
 }
 
@@ -181,9 +222,7 @@ static char* read_line() {
   return nullptr;
 }
 
-static void print_help() {
-  Serial.println();
-  Serial.printf("%s=== StatusLed CLI Help ===%s\n", LOG_COLOR_CYAN, LOG_COLOR_RESET);
+static void print_version() {
   Serial.print(F("Version: "));
   Serial.println(StatusLed::VERSION);
   Serial.print(F("Built:   "));
@@ -193,9 +232,16 @@ static void print_help() {
   Serial.print(F(" ("));
   Serial.print(StatusLed::GIT_STATUS);
   Serial.println(F(")"));
+}
+
+static void print_help() {
+  Serial.println();
+  Serial.printf("%s=== StatusLed CLI Help ===%s\n", LOG_COLOR_CYAN, LOG_COLOR_RESET);
+  print_version();
   Serial.println();
   print_help_section("Common");
   print_help_item("help", "Show this help");
+  print_help_item("version", "Print build/version metadata");
   Serial.println();
   print_help_section("Lifecycle");
   print_help_item("begin [pin] [count] [grb|rgb] [rmt] [smooth_ms]", "Initialize driver");
@@ -204,6 +250,7 @@ static void print_help() {
   print_help_item("stress off", "Disable stress mode");
   Serial.println();
   print_help_section("Inspect");
+  print_help_item("info", "Print version, backend, config, and last status");
   print_help_item("status [index]", "Show LED snapshot (one or all)");
   print_help_item("config", "Print active configuration");
   print_help_item("last", "Print last driver status");
@@ -231,18 +278,46 @@ static void print_help() {
 
 static void print_config() {
   Serial.print(F("dataPin="));
-  Serial.print(g_config.dataPin);
+  Serial.print(g_leds.config().dataPin);
   Serial.print(F(" ledCount="));
-  Serial.print(g_config.ledCount);
+  Serial.print(g_leds.config().ledCount);
   Serial.print(F(" order="));
   Serial.printf("%s%s%s",
                 LOG_COLOR_CYAN,
-                g_config.colorOrder == StatusLed::ColorOrder::GRB ? "GRB" : "RGB",
+                g_leds.config().colorOrder == StatusLed::ColorOrder::GRB ? "GRB" : "RGB",
                 LOG_COLOR_RESET);
   Serial.print(F(" rmt="));
-  Serial.print(g_config.rmtChannel);
+  Serial.print(g_leds.config().rmtChannel);
   Serial.print(F(" smoothStepMs="));
-  Serial.println(g_config.smoothStepMs);
+  Serial.println(g_leds.config().smoothStepMs);
+}
+
+static void print_info() {
+  print_version();
+  Serial.print(F("Backend: "));
+  Serial.println(backend_name(StatusLed::kSelectedBackend));
+  Serial.print(F("Initialized: "));
+  Serial.println(g_leds.isInitialized() ? "true" : "false");
+  Serial.print(F("Configured LEDs: "));
+  Serial.println(g_leds.ledCount());
+  Serial.print(F("Config: "));
+  print_config();
+
+  const StatusLed::Status st = g_leds.lastStatus();
+  Serial.print(F("Last status: code="));
+  Serial.print(st.ok() ? LOG_COLOR_GREEN : LOG_COLOR_RED);
+  Serial.print(static_cast<int>(st.code));
+  Serial.print(LOG_COLOR_RESET);
+  Serial.print(F(" inProgress="));
+  Serial.print(st.inProgress() ? "true" : "false");
+  Serial.print(F(" detail="));
+  Serial.print(st.detail);
+  Serial.print(F(" msg="));
+  if (st.msg && st.msg[0] != '\0') {
+    Serial.printf("%s%s%s\n", LOG_COLOR_YELLOW, st.msg, LOG_COLOR_RESET);
+  } else {
+    Serial.println("-");
+  }
 }
 
 static void print_status_one(uint8_t index) {
@@ -315,13 +390,13 @@ static void begin_default() {
   }
 
   if (g_config.ledCount > 0) {
-    g_leds.setPreset(0, StatusLed::StatusPreset::Ready);
+    log_status(g_leds.setPreset(0, StatusLed::StatusPreset::Ready));
   }
   if (g_config.ledCount > 1) {
-    g_leds.setPreset(1, StatusLed::StatusPreset::Busy);
+    log_status(g_leds.setPreset(1, StatusLed::StatusPreset::Busy));
   }
   if (g_config.ledCount > 2) {
-    g_leds.setPreset(2, StatusLed::StatusPreset::Warning);
+    log_status(g_leds.setPreset(2, StatusLed::StatusPreset::Warning));
   }
   LOGI("Started with defaults. dataPin=%d ledCount=%u", g_config.dataPin, g_config.ledCount);
 }
@@ -379,18 +454,31 @@ static void handle_command(char* line) {
     return;
   }
 
+  if (strcmp(argv[0], "version") == 0) {
+    print_version();
+    return;
+  }
+
+  if (strcmp(argv[0], "info") == 0) {
+    print_info();
+    return;
+  }
+
   if (strcmp(argv[0], "begin") == 0) {
     int pin = pins::LED_DATA;
-    uint32_t count = pins::LED_COUNT;
+    uint8_t count = pins::LED_COUNT;
     StatusLed::ColorOrder order = StatusLed::ColorOrder::GRB;
-    uint32_t rmt = 0;
-    uint32_t smooth = 20;
+    uint8_t rmt = 0;
+    uint16_t smooth = 20;
 
     if (argc > 1) {
       pin = atoi(argv[1]);
     }
     if (argc > 2) {
-      parse_u32(argv[2], &count);
+      if (!parse_u8_range(argv[2], &count, StatusLed::StatusLed::kMaxLedCount)) {
+        LOGE("invalid LED count");
+        return;
+      }
     }
     if (argc > 3) {
       if (strcmp(argv[3], "rgb") == 0) {
@@ -400,17 +488,23 @@ static void handle_command(char* line) {
       }
     }
     if (argc > 4) {
-      parse_u32(argv[4], &rmt);
+      if (!parse_u8_range(argv[4], &rmt, 3)) {
+        LOGE("invalid RMT channel");
+        return;
+      }
     }
     if (argc > 5) {
-      parse_u32(argv[5], &smooth);
+      if (!parse_u16_range(argv[5], &smooth, 5, 1000)) {
+        LOGE("invalid smooth_ms");
+        return;
+      }
     }
 
     g_config.dataPin = pin;
-    g_config.ledCount = static_cast<uint8_t>(count);
+    g_config.ledCount = count;
     g_config.colorOrder = order;
-    g_config.rmtChannel = static_cast<uint8_t>(rmt);
-    g_config.smoothStepMs = static_cast<uint16_t>(smooth);
+    g_config.rmtChannel = rmt;
+    g_config.smoothStepMs = smooth;
 
     const StatusLed::Status st = g_leds.begin(g_config);
     g_initialized = st.ok();
@@ -454,11 +548,13 @@ static void handle_command(char* line) {
   }
 
   if (strcmp(argv[0], "last") == 0) {
-    const StatusLed::Status st = g_leds.getLastStatus();
+    const StatusLed::Status st = g_leds.lastStatus();
     Serial.print(F("last: code="));
     Serial.print(st.ok() ? LOG_COLOR_GREEN : LOG_COLOR_RED);
     Serial.print(static_cast<int>(st.code));
     Serial.print(LOG_COLOR_RESET);
+    Serial.print(F(" inProgress="));
+    Serial.print(st.inProgress() ? "true" : "false");
     Serial.print(F(" detail="));
     Serial.print(st.detail);
     Serial.print(F(" msg="));
@@ -491,7 +587,11 @@ static void handle_command(char* line) {
       LOGE("invalid mode");
       return;
     }
-    g_leds.setMode(static_cast<uint8_t>(idx), mode);
+    if (idx > UINT8_MAX) {
+      LOGE("invalid index");
+      return;
+    }
+    log_status(g_leds.setMode(static_cast<uint8_t>(idx), mode));
     return;
   }
 
@@ -506,42 +606,52 @@ static void handle_command(char* line) {
       LOGE("invalid mode");
       return;
     }
+    if (idx > UINT8_MAX) {
+      LOGE("invalid index");
+      return;
+    }
     StatusLed::ModeParams params;
-    uint32_t tmp = 0;
-    parse_u32(argv[3], &tmp);
-    params.periodMs = static_cast<uint16_t>(tmp);
-    parse_u32(argv[4], &tmp);
-    params.onMs = static_cast<uint16_t>(tmp);
-    parse_u32(argv[5], &tmp);
-    params.riseMs = static_cast<uint16_t>(tmp);
-    parse_u32(argv[6], &tmp);
-    params.fallMs = static_cast<uint16_t>(tmp);
-    parse_u32(argv[7], &tmp);
-    params.minLevel = static_cast<uint8_t>(tmp);
-    parse_u32(argv[8], &tmp);
-    params.maxLevel = static_cast<uint8_t>(tmp);
-    g_leds.setMode(static_cast<uint8_t>(idx), mode, params);
+    if (!parse_u16_range(argv[3], &params.periodMs, 1, UINT16_MAX) ||
+        !parse_u16_range(argv[4], &params.onMs, 0, UINT16_MAX) ||
+        !parse_u16_range(argv[5], &params.riseMs, 0, UINT16_MAX) ||
+        !parse_u16_range(argv[6], &params.fallMs, 0, UINT16_MAX) ||
+        !parse_u8_range(argv[7], &params.minLevel, 255) ||
+        !parse_u8_range(argv[8], &params.maxLevel, 255)) {
+      LOGE("invalid mode parameters");
+      return;
+    }
+    log_status(g_leds.setMode(static_cast<uint8_t>(idx), mode, params));
     return;
   }
 
   if (strcmp(argv[0], "color") == 0 && argc >= 5) {
     uint32_t idx = 0;
-    uint32_t r = 0;
-    uint32_t g = 0;
-    uint32_t b = 0;
-    if (parse_u32(argv[1], &idx) && parse_u32(argv[2], &r) && parse_u32(argv[3], &g) && parse_u32(argv[4], &b)) {
-      g_leds.setColor(static_cast<uint8_t>(idx), StatusLed::RgbColor(r, g, b));
+    uint8_t r = 0;
+    uint8_t g = 0;
+    uint8_t b = 0;
+    if (parse_u32(argv[1], &idx) && idx <= UINT8_MAX &&
+        parse_u8_range(argv[2], &r, 255) &&
+        parse_u8_range(argv[3], &g, 255) &&
+        parse_u8_range(argv[4], &b, 255)) {
+      log_status(g_leds.setColor(static_cast<uint8_t>(idx), StatusLed::RgbColor(r, g, b)));
+    } else {
+      LOGE("invalid color args");
     }
     return;
   }
 
   if (strcmp(argv[0], "alt") == 0 && argc >= 5) {
     uint32_t idx = 0;
-    uint32_t r = 0;
-    uint32_t g = 0;
-    uint32_t b = 0;
-    if (parse_u32(argv[1], &idx) && parse_u32(argv[2], &r) && parse_u32(argv[3], &g) && parse_u32(argv[4], &b)) {
-      g_leds.setSecondaryColor(static_cast<uint8_t>(idx), StatusLed::RgbColor(r, g, b));
+    uint8_t r = 0;
+    uint8_t g = 0;
+    uint8_t b = 0;
+    if (parse_u32(argv[1], &idx) && idx <= UINT8_MAX &&
+        parse_u8_range(argv[2], &r, 255) &&
+        parse_u8_range(argv[3], &g, 255) &&
+        parse_u8_range(argv[4], &b, 255)) {
+      log_status(g_leds.setSecondaryColor(static_cast<uint8_t>(idx), StatusLed::RgbColor(r, g, b)));
+    } else {
+      LOGE("invalid color args");
     }
     return;
   }
@@ -553,7 +663,11 @@ static void handle_command(char* line) {
       LOGE("invalid preset");
       return;
     }
-    g_leds.setPreset(static_cast<uint8_t>(idx), preset);
+    if (idx > UINT8_MAX) {
+      LOGE("invalid index");
+      return;
+    }
+    log_status(g_leds.setPreset(static_cast<uint8_t>(idx), preset));
     return;
   }
 
@@ -564,7 +678,11 @@ static void handle_command(char* line) {
       LOGE("invalid preset");
       return;
     }
-    g_leds.setDefaultPreset(static_cast<uint8_t>(idx), preset);
+    if (idx > UINT8_MAX) {
+      LOGE("invalid index");
+      return;
+    }
+    log_status(g_leds.setDefaultPreset(static_cast<uint8_t>(idx), preset));
     return;
   }
 
@@ -576,37 +694,49 @@ static void handle_command(char* line) {
       LOGE("invalid temp args");
       return;
     }
-    g_leds.setTemporaryPreset(static_cast<uint8_t>(idx), preset, duration);
+    if (idx > UINT8_MAX) {
+      LOGE("invalid index");
+      return;
+    }
+    log_status(g_leds.setTemporaryPreset(static_cast<uint8_t>(idx), preset, duration));
     return;
   }
 
   if (strcmp(argv[0], "bright") == 0 && argc >= 3) {
     uint32_t idx = 0;
-    uint32_t level = 0;
-    if (parse_u32(argv[1], &idx) && parse_u32(argv[2], &level)) {
-      g_leds.setBrightness(static_cast<uint8_t>(idx), static_cast<uint8_t>(level));
+    uint8_t level = 0;
+    if (parse_u32(argv[1], &idx) && idx <= UINT8_MAX &&
+        parse_u8_range(argv[2], &level, 255)) {
+      log_status(g_leds.setBrightness(static_cast<uint8_t>(idx), level));
+    } else {
+      LOGE("invalid brightness args");
     }
     return;
   }
 
   if (strcmp(argv[0], "gbright") == 0 && argc >= 2) {
-    uint32_t level = 0;
-    if (parse_u32(argv[1], &level)) {
-      g_leds.setGlobalBrightness(static_cast<uint8_t>(level));
+    uint8_t level = 0;
+    if (parse_u8_range(argv[1], &level, 255)) {
+      log_status(g_leds.setGlobalBrightness(level));
+    } else {
+      LOGE("invalid brightness");
     }
     return;
   }
 
   if (strcmp(argv[0], "clear") == 0) {
-    g_leds.clear();
-    LOGI("Cleared.");
+    if (log_status(g_leds.clear())) {
+      LOGI("Cleared.");
+    }
     return;
   }
 
   if (strcmp(argv[0], "cleartemp") == 0 && argc >= 2) {
     uint32_t idx = 0;
-    if (parse_u32(argv[1], &idx)) {
-      g_leds.clearTemporary(static_cast<uint8_t>(idx));
+    if (parse_u32(argv[1], &idx) && idx <= UINT8_MAX) {
+      log_status(g_leds.clearTemporary(static_cast<uint8_t>(idx)));
+    } else {
+      LOGE("invalid index");
     }
     return;
   }
@@ -617,7 +747,7 @@ static void handle_command(char* line) {
       LOGE("invalid preset");
       return;
     }
-    g_leds.setAllPreset(preset);
+    log_status(g_leds.setAllPreset(preset));
     return;
   }
 
@@ -627,16 +757,20 @@ static void handle_command(char* line) {
       LOGE("invalid mode");
       return;
     }
-    g_leds.setAllMode(mode);
+    log_status(g_leds.setAllMode(mode));
     return;
   }
 
   if (strcmp(argv[0], "allcolor") == 0 && argc >= 4) {
-    uint32_t r = 0;
-    uint32_t g = 0;
-    uint32_t b = 0;
-    if (parse_u32(argv[1], &r) && parse_u32(argv[2], &g) && parse_u32(argv[3], &b)) {
-      g_leds.setAllColor(StatusLed::RgbColor(r, g, b));
+    uint8_t r = 0;
+    uint8_t g = 0;
+    uint8_t b = 0;
+    if (parse_u8_range(argv[1], &r, 255) &&
+        parse_u8_range(argv[2], &g, 255) &&
+        parse_u8_range(argv[3], &b, 255)) {
+      log_status(g_leds.setAllColor(StatusLed::RgbColor(r, g, b)));
+    } else {
+      LOGE("invalid color args");
     }
     return;
   }
@@ -649,13 +783,20 @@ static void handle_command(char* line) {
 
   if (strcmp(argv[0], "stress") == 0 && argc >= 2) {
     if (strcmp(argv[1], "on") == 0) {
+      if (!g_initialized) {
+        LOGE("begin before enabling stress");
+        return;
+      }
       g_stress.active = true;
       g_stress.step = 0;
       g_stress.nextMs = millis();
       if (argc > 2) {
-        uint32_t period = 0;
-        if (parse_u32(argv[2], &period)) {
-          g_stress.periodMs = static_cast<uint16_t>(period);
+        uint16_t period = 0;
+        if (parse_u16_range(argv[2], &period, 1, UINT16_MAX)) {
+          g_stress.periodMs = period;
+        } else {
+          LOGE("invalid stress period");
+          return;
         }
       }
       LOGI("Stress test enabled. period=%u ms", g_stress.periodMs);

@@ -46,21 +46,25 @@ namespace StatusLed {
 #error "Multiple backends selected. Set only one STATUSLED_BACKEND_* macro to 1"
 #endif
 
-/// @brief Selected backend type.
+/// @brief Compile-time selected LED output backend.
 enum class BackendType : uint8_t {
-  IdfWs2812 = 0,
-  NeoPixelBus = 1,
-  Null = 2,
-  Idf5Ws2812 = 3
+  IdfWs2812 = 0,   ///< ESP-IDF 4.x RMT WS2812 backend.
+  NeoPixelBus = 1, ///< NeoPixelBus backend.
+  Null = 2,        ///< Host-test/no-hardware backend.
+  Idf5Ws2812 = 3   ///< ESP-IDF 5.x RMT WS2812 backend.
 };
 
 #if STATUSLED_BACKEND_IDF_WS2812
+/// @brief Backend selected by STATUSLED_BACKEND_* compile-time flags.
 static constexpr BackendType kSelectedBackend = BackendType::IdfWs2812;
 #elif STATUSLED_BACKEND_IDF5_WS2812
+/// @brief Backend selected by STATUSLED_BACKEND_* compile-time flags.
 static constexpr BackendType kSelectedBackend = BackendType::Idf5Ws2812;
 #elif STATUSLED_BACKEND_NEOPIXELBUS
+/// @brief Backend selected by STATUSLED_BACKEND_* compile-time flags.
 static constexpr BackendType kSelectedBackend = BackendType::NeoPixelBus;
 #else
+/// @brief Backend selected by STATUSLED_BACKEND_* compile-time flags.
 static constexpr BackendType kSelectedBackend = BackendType::Null;
 #endif
 

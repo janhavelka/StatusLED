@@ -46,6 +46,7 @@ struct Config {
   uint8_t rmtChannel = 0;
 
   /// @brief Global brightness scale (0..255).
+  /// @note Applied after per-LED brightness.
   uint8_t globalBrightness = 255;
 
   /// @brief Minimum step period for smooth animations in milliseconds.
