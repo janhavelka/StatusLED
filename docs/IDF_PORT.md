@@ -20,8 +20,9 @@ and pure ESP-IDF while preserving the existing CLI example behavior.
   `volatile bool`.
 - Root `CMakeLists.txt` and `idf_component.yml` make the library consumable as
   an ESP-IDF component.
-- `examples/espidf_basic` provides a native `app_main()` using `esp_timer` and
-  the IDF5 backend.
+- `examples/espidf_basic` provides a native `app_main()` that shares the same
+  colored interactive CLI source as the Arduino example while using the IDF5
+  backend.
 
 ## Current State
 
@@ -168,13 +169,17 @@ If using the custom RMT backend only, omit the `led_strip` dependency.
 ## Example Plan
 
 - IDF example:
-  - `examples/espidf_basic/main/main.cpp` with `app_main()`.
-  - Configure `StatusLed::Config` locally: `dataPin`, `ledCount`,
-    `colorOrder`, brightness, and smoothing.
-  - Call `begin(config)`, set a few states/modes, and call `tick(nowMs)` from a
-    loop.
-  - Use `nowMs = esp_timer_get_time() / 1000`.
-  - Use `vTaskDelay(pdMS_TO_TICKS(10))` in the example loop only.
+  - `examples/espidf_basic/main/main.cpp` defines
+    `STATUSLED_EXAMPLE_PLATFORM_IDF`, includes
+    `examples/common/IdfArduinoCompat.h`, and then includes
+    `examples/01_status_led_cli/main.cpp`.
+  - The Arduino and ESP-IDF examples therefore expose the same help grouping,
+    colorized output, lifecycle commands, status/config views, stress mode,
+    mode/preset lists, and per-LED control commands.
+  - `IdfArduinoCompat.h` provides only the small example-local `Serial`,
+    `millis()`, `delay()`, `yield()`, and `F()` surface needed by the CLI.
+  - The ESP-IDF `app_main()` calls the shared `setup()` / `loop()` flow and
+    yields with `vTaskDelay()`.
 - Arduino example:
   - Keep existing Arduino examples and backend macros unchanged.
   - Add an Arduino build check after CMake files are added.
@@ -223,7 +228,7 @@ Completed locally:
 
 Pending in this shell:
 
-- `idf.py build` for `examples/espidf_basic`
+- `idf.py build` for the shared-source CLI in `examples/espidf_basic`
 - Hardware smoke, busy-path, and cleanup tests
 
 `idf.py` was not available on PATH during this implementation pass, so the

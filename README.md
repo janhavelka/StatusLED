@@ -22,7 +22,7 @@ pio device monitor -e cli_esp32s3_idf
 | ESP32-S2-Saola-1   | `cli_esp32s2_idf`   | Legacy IDF RMT (4.4.x) | USB CDC enabled |
 | ESP32-S3-DevKitC-1 | `cli_esp32s3_idf5`  | IDF5 RMT v2            | USB CDC enabled |
 | ESP32-S2-Saola-1   | `cli_esp32s2_idf5`  | IDF5 RMT v2            | USB CDC enabled |
-| ESP32-S3/S2         | `examples/espidf_basic` | IDF5 RMT v2        | Native ESP-IDF component |
+| ESP32-S3/S2         | `examples/espidf_basic` | IDF5 RMT v2        | Native ESP-IDF component sharing the full CLI |
 
 NeoPixelBus envs are also provided (opt-in): `cli_esp32s3_neopixelbus`, `cli_esp32s2_neopixelbus`.
 
@@ -224,7 +224,7 @@ pio device monitor -e cli_esp32s2_idf
 pio run -e cli_esp32s2_idf5 -t upload
 pio device monitor -e cli_esp32s2_idf5
 
-# Native ESP-IDF example, from examples/espidf_basic when idf.py is available
+# Native ESP-IDF full CLI, from examples/espidf_basic when idf.py is available
 idf.py set-target esp32s3
 idf.py build
 ```

@@ -6,7 +6,11 @@
  * Type 'help' for available commands.
  */
 
+#if defined(STATUSLED_EXAMPLE_PLATFORM_IDF)
+#include "examples/common/IdfArduinoCompat.h"
+#else
 #include <Arduino.h>
+#endif
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
