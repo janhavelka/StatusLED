@@ -1,6 +1,10 @@
 /**
  * @file BackendConfig.h
  * @brief Compile-time backend selection for StatusLed.
+ *
+ * Pure ESP-IDF v6 component builds select STATUSLED_BACKEND_IDF5_WS2812.
+ * Arduino/PlatformIO environments may still select legacy RMT, IDF5 RMT,
+ * NeoPixelBus, or the null backend explicitly.
  */
 
 #pragma once

@@ -15,9 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `config()` and `lastStatus()` aliases for shorter public accessors.
 - CLI `version` and `info` diagnostics for build metadata, backend, config,
   and last status.
+- ESP-IDF component metadata and a native `examples/espidf_basic` app using the
+  IDF5 RMT backend.
+- ESP-IDF port implementation notes.
 
 ### Changed
 - README now explicitly calls out the `status-led` PlatformIO package name.
+- PlatformIO metadata now declares ESP-IDF framework compatibility.
+- IDF5 RMT backend transmit state now uses backend-owned payload storage and an
+  atomic callback handoff instead of a stack payload and volatile busy flag.
 
 ## [1.3.0] - 2026-03-01
 

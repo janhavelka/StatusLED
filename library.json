@@ -7,6 +7,7 @@
     "esp32-s2",
     "esp32-s3",
     "arduino",
+    "esp-idf",
     "platformio",
     "embedded",
     "status-led",
@@ -35,7 +36,8 @@
   "license": "MIT",
   "homepage": "https://github.com/janhavelka/StatusLED",
   "frameworks": [
-    "arduino"
+    "arduino",
+    "espidf"
   ],
   "platforms": [
     "espressif32"

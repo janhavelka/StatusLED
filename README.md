@@ -1,6 +1,8 @@
 # StatusLED
 
-Production-grade status LED subsystem for ESP32-S2/S3 (WS2812/NeoPixel-class) using Arduino + PlatformIO.
+Production-grade status LED subsystem for ESP32-S2/S3 (WS2812/NeoPixel-class).
+The animation core is framework-neutral; Arduino/PlatformIO and pure ESP-IDF
+builds select the output backend at compile time.
 
 PlatformIO package name: `status-led`.
 
@@ -20,6 +22,7 @@ pio device monitor -e cli_esp32s3_idf
 | ESP32-S2-Saola-1   | `cli_esp32s2_idf`   | Legacy IDF RMT (4.4.x) | USB CDC enabled |
 | ESP32-S3-DevKitC-1 | `cli_esp32s3_idf5`  | IDF5 RMT v2            | USB CDC enabled |
 | ESP32-S2-Saola-1   | `cli_esp32s2_idf5`  | IDF5 RMT v2            | USB CDC enabled |
+| ESP32-S3/S2         | `examples/espidf_basic` | IDF5 RMT v2        | Native ESP-IDF component |
 
 NeoPixelBus envs are also provided (opt-in): `cli_esp32s3_neopixelbus`, `cli_esp32s2_neopixelbus`.
 
@@ -179,6 +182,14 @@ Set exactly one backend macro to `1` (others `0`). The provided environments alr
 
 `rmtChannel` from `Config` is used by legacy IDF and NeoPixelBus backends.
 The IDF5 backend allocates an RMT TX channel dynamically and ignores `rmtChannel`.
+For pure ESP-IDF v6, the root `CMakeLists.txt` compiles only
+`StatusLed.cpp` and `StatusLedBackendIdf5.cpp` and defines exactly one backend:
+`STATUSLED_BACKEND_IDF5_WS2812=1`. It does not compile the legacy
+`driver/rmt.h` backend or the Arduino/NeoPixelBus backend.
+
+The IDF5 backend keeps RMT transmit payload bytes in backend-owned storage until
+the queued transaction completes. The transmit-done callback only clears an
+atomic busy flag; normal code checks that flag before submitting another frame.
 
 ## Threading and Timing Model
 
@@ -212,6 +223,10 @@ pio device monitor -e cli_esp32s2_idf
 # CLI (S2, IDF5 backend)
 pio run -e cli_esp32s2_idf5 -t upload
 pio device monitor -e cli_esp32s2_idf5
+
+# Native ESP-IDF example, from examples/espidf_basic when idf.py is available
+idf.py set-target esp32s3
+idf.py build
 ```
 
 Windows note for IDF5 envs: if package extraction fails due long paths, enable

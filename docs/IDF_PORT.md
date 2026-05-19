@@ -1,9 +1,27 @@
-# StatusLED ESP-IDF v6.0.1 Port Readiness Audit
+# StatusLED ESP-IDF v6.0.1 Port
 
 Date: 2026-05-17.
-Scope: documentation for a future ESP-IDF port only. Do not change code,
-`library.json`, `README.md`, `CHANGELOG.md`, generated files, examples, or
-tests while applying this audit.
+Updated: 2026-05-19.
+Scope: keep the StatusLED animation core usable from both Arduino/PlatformIO
+and pure ESP-IDF while preserving the existing CLI example behavior.
+
+## Result
+
+- The animation core remains framework-neutral. `StatusLed.cpp` has no Arduino
+  or ESP-IDF timing ownership; applications drive it with `tick(nowMs)`.
+- Pure ESP-IDF builds use the IDF5 RMT v2 backend only:
+  `STATUSLED_BACKEND_IDF5_WS2812=1`.
+- The IDF v6 component does not compile the legacy `<driver/rmt.h>` backend or
+  the Arduino/NeoPixelBus backend.
+- The IDF5 backend no longer passes a stack payload to queued RMT
+  transmissions. Payload bytes are held in backend-owned storage until the
+  transfer completes.
+- The RMT done callback now clears an atomic busy flag instead of writing a
+  `volatile bool`.
+- Root `CMakeLists.txt` and `idf_component.yml` make the library consumable as
+  an ESP-IDF component.
+- `examples/espidf_basic` provides a native `app_main()` using `esp_timer` and
+  the IDF5 backend.
 
 ## Current State
 
@@ -19,29 +37,23 @@ tests while applying this audit.
   `<driver/rmt_tx.h>` and `<driver/rmt_encoder.h>`.
 - `src/StatusLedBackendNeoPixelBus.cpp` is Arduino/NeoPixelBus oriented.
 - `src/StatusLedBackendNull.cpp` is suitable for host/unit tests.
-- `platformio.ini` currently selects different backend macros by environment.
-  There is no pure ESP-IDF component build or IDF example.
+- `platformio.ini` selects different Arduino backend macros by environment.
+- Pure ESP-IDF component metadata and `examples/espidf_basic` are present.
 - PlatformIO environment names such as `cli_esp32s3_idf` are not pure ESP-IDF
   v6 validation. They still use `framework = arduino` and may select the legacy
   RMT backend; treat them as Arduino regression checks only.
 
-## Blockers
+## Previous Blockers Resolved
 
-- IDF v6 removed the legacy RMT driver. Any IDF v6 build that compiles
-  `src/StatusLedBackendIdf.cpp` or includes `<driver/rmt.h>` will fail.
-- `STATUSLED_BACKEND_NEOPIXELBUS` is not a pure IDF backend.
-- `STATUSLED_BACKEND_IDF5_WS2812` is the only current candidate for IDF v6, but
-  it needs an IDF v6 audit for CMake dependencies, TX buffer lifetime, callback
-  synchronization, and error handling.
-- `src/StatusLedBackendIdf5.cpp` builds a stack `payload` in `show()` and calls
-  `rmt_transmit()`. This is a hard IDF v6 blocker: for queued/nonblocking RMT
-  transactions, move the payload to backend-owned storage or wait for completion
-  before returning.
-- `_txBusy` is modified from the RMT done callback and read by normal code.
-  Replace the `volatile bool` pattern with a callback-safe primitive or a
-  documented critical-section/atomic handoff before treating the backend as
-  production-ready.
-- No root `CMakeLists.txt`, `idf_component.yml`, or IDF-native example exists.
+- IDF v6 removed the legacy RMT driver. The pure IDF component does not compile
+  `src/StatusLedBackendIdf.cpp` or include `<driver/rmt.h>`.
+- `STATUSLED_BACKEND_NEOPIXELBUS` is not a pure IDF backend and is excluded from
+  the pure IDF component.
+- `STATUSLED_BACKEND_IDF5_WS2812` now has explicit CMake dependencies,
+  backend-owned TX payload storage, callback-safe busy-state handoff, and
+  `esp_err_t` to `Status` error mapping at the backend boundary.
+- Root `CMakeLists.txt`, `idf_component.yml`, and a native IDF example are
+  present.
 
 ## Exact Files and APIs to Change
 
@@ -62,13 +74,9 @@ tests while applying this audit.
   - Audit `rmt_new_tx_channel()`, `rmt_new_bytes_encoder()`, `rmt_enable()`,
     `rmt_transmit()`, `rmt_tx_wait_all_done()`, and delete paths.
   - Make payload lifetime and callback synchronization deterministic.
-- Optional new backend:
-  - Add `src/StatusLedBackendLedStrip.cpp` if the official `led_strip`
-    component is preferred over a custom RMT encoder.
-- Build/example files to add later:
-  - `CMakeLists.txt`
-  - `idf_component.yml`
-  - `examples/espidf_basic/`
+- Optional future backend:
+  - Add `src/StatusLedBackendLedStrip.cpp` only if the official `led_strip`
+    component is preferred over the custom RMT encoder.
 
 ## Compatibility Architecture
 
@@ -200,17 +208,24 @@ If using the custom RMT backend only, omit the `led_strip` dependency.
 - `Config::rmtChannel` is ignored by the current new-RMT backend. IDF v6 RMT
   allocates channels dynamically; document this or remove use in IDF builds.
 
-## Ordered Checklist
+## Validation
 
-1. Exclude `src/StatusLedBackendIdf.cpp` from IDF v6 builds.
-2. Select exactly one IDF backend macro in CMake.
-3. Fix `src/StatusLedBackendIdf5.cpp` payload lifetime with backend-owned
-   storage or a blocking wait before `show()` returns.
-4. Make RMT done callback state synchronization safe; `volatile bool` is not a
-   sufficient cross-context contract.
-5. Add root `CMakeLists.txt` and optional `idf_component.yml`.
-6. Add a minimal IDF example using `esp_timer`.
-7. Build null-backend host/unit tests.
-8. Build IDF RMT backend for `esp32s2` and `esp32s3`.
-9. Build existing Arduino examples to verify compatibility.
-10. Run WS2812 hardware smoke, busy-path, and cleanup tests.
+Completed locally:
+
+- `python -m platformio test -e native`
+- `python -m platformio run -e cli_esp32s3_idf5`
+- `python -m platformio run -e cli_esp32s2_idf5`
+- `python -m platformio run -e cli_esp32s3_idf`
+- `python -m platformio run -e cli_esp32s2_idf`
+- `python scripts/generate_version.py`
+- `python scripts/check_text_integrity.py`
+- `git diff --check`
+
+Pending in this shell:
+
+- `idf.py build` for `examples/espidf_basic`
+- Hardware smoke, busy-path, and cleanup tests
+
+`idf.py` was not available on PATH during this implementation pass, so the
+ESP-IDF example is implemented and documented but still needs a real ESP-IDF
+toolchain build before release.

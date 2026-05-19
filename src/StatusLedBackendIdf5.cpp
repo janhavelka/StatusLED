@@ -9,6 +9,7 @@
 #if STATUSLED_BACKEND_IDF5_WS2812
 
 #include <stddef.h>
+#include <atomic>
 #include <new>
 
 extern "C" {
@@ -101,7 +102,7 @@ class BackendIdf5Ws2812 final : public BackendBase {
     }
 
     _count = config.ledCount;
-    _txBusy = false;
+    _txBusy.store(false, std::memory_order_release);
     _installed = true;
     return Ok();
   }
@@ -109,13 +110,15 @@ class BackendIdf5Ws2812 final : public BackendBase {
   void end() override {
     if (_installed && _tx_chan != nullptr && _bytes_encoder != nullptr && _count > 0) {
       if (rmt_tx_wait_all_done(_tx_chan, kCleanupWaitMs) == ESP_OK) {
-        uint8_t blank[kMaxPayloadBytes]{};
+        for (size_t i = 0; i < kMaxPayloadBytes; ++i) {
+          _payload[i] = 0;
+        }
         rmt_transmit_config_t txConfig{};
         txConfig.loop_count = 0;
         txConfig.flags.eot_level = 0;
         const size_t payloadSize = static_cast<size_t>(_count) * kBytesPerLed;
         const esp_err_t txErr =
-            rmt_transmit(_tx_chan, _bytes_encoder, blank, payloadSize, &txConfig);
+            rmt_transmit(_tx_chan, _bytes_encoder, _payload, payloadSize, &txConfig);
         if (txErr == ESP_OK) {
           (void)rmt_tx_wait_all_done(_tx_chan, kCleanupWaitMs);
         }
@@ -136,14 +139,14 @@ class BackendIdf5Ws2812 final : public BackendBase {
 
     _installed = false;
     _count = 0;
-    _txBusy = false;
+    _txBusy.store(false, std::memory_order_release);
   }
 
   bool canShow() const override {
     if (!_installed || _tx_chan == nullptr) {
       return false;
     }
-    return !_txBusy;
+    return !_txBusy.load(std::memory_order_acquire);
   }
 
   Status show(const RgbColor* frame, uint8_t count, ColorOrder order) override {
@@ -162,31 +165,31 @@ class BackendIdf5Ws2812 final : public BackendBase {
     if (!isValidColorOrder(order)) {
       return Status(Err::INVALID_CONFIG, static_cast<int32_t>(order), "invalid colorOrder");
     }
-    if (_txBusy) {
+    if (_txBusy.load(std::memory_order_acquire)) {
       return Status(Err::RESOURCE_BUSY, 0, "rmt busy");
     }
 
-    uint8_t payload[kMaxPayloadBytes]{};
     size_t offset = 0;
     for (uint8_t i = 0; i < count; ++i) {
       const RgbColor mapped = mapColorOrder(frame[i], ColorOrder::RGB, order);
-      payload[offset++] = mapped.r;
-      payload[offset++] = mapped.g;
-      payload[offset++] = mapped.b;
+      _payload[offset++] = mapped.r;
+      _payload[offset++] = mapped.g;
+      _payload[offset++] = mapped.b;
     }
 
     rmt_transmit_config_t txConfig{};
     txConfig.loop_count = 0;
     txConfig.flags.eot_level = 0;
     const size_t payloadSize = static_cast<size_t>(count) * kBytesPerLed;
-    _txBusy = true;
-    const esp_err_t err = rmt_transmit(_tx_chan, _bytes_encoder, payload, payloadSize, &txConfig);
+    _txBusy.store(true, std::memory_order_release);
+    const esp_err_t err =
+        rmt_transmit(_tx_chan, _bytes_encoder, _payload, payloadSize, &txConfig);
     if (err == ESP_ERR_INVALID_STATE || err == ESP_ERR_TIMEOUT) {
-      _txBusy = false;
+      _txBusy.store(false, std::memory_order_release);
       return Status(Err::RESOURCE_BUSY, err, "rmt busy");
     }
     if (err != ESP_OK) {
-      _txBusy = false;
+      _txBusy.store(false, std::memory_order_release);
       return Status(Err::HARDWARE_FAULT, err, "rmt_transmit failed");
     }
 
@@ -199,7 +202,7 @@ class BackendIdf5Ws2812 final : public BackendBase {
     (void)data;
     BackendIdf5Ws2812* self = static_cast<BackendIdf5Ws2812*>(userCtx);
     if (self != nullptr) {
-      self->_txBusy = false;
+      self->_txBusy.store(false, std::memory_order_release);
     }
     return false;
   }
@@ -219,7 +222,8 @@ class BackendIdf5Ws2812 final : public BackendBase {
   rmt_encoder_handle_t _bytes_encoder = nullptr;
   bool _installed = false;
   uint8_t _count = 0;
-  volatile bool _txBusy = false;
+  uint8_t _payload[kMaxPayloadBytes] = {};
+  std::atomic<bool> _txBusy{false};
 };
 
 }  // namespace
