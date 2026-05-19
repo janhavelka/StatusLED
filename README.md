@@ -22,7 +22,7 @@ pio device monitor -e cli_esp32s3_idf
 | ESP32-S2-Saola-1   | `cli_esp32s2_idf`   | Legacy IDF RMT (4.4.x) | USB CDC enabled |
 | ESP32-S3-DevKitC-1 | `cli_esp32s3_idf5`  | IDF5 RMT v2            | USB CDC enabled |
 | ESP32-S2-Saola-1   | `cli_esp32s2_idf5`  | IDF5 RMT v2            | USB CDC enabled |
-| ESP32-S3/S2         | `examples/espidf_basic` | IDF5 RMT v2        | Native ESP-IDF component sharing the full CLI |
+| ESP32-S3/S2         | `examples/espidf_basic` | IDF5 RMT v2        | Native ESP-IDF fixed-buffer CLI |
 
 NeoPixelBus envs are also provided (opt-in): `cli_esp32s3_neopixelbus`, `cli_esp32s2_neopixelbus`.
 
@@ -224,10 +224,14 @@ pio device monitor -e cli_esp32s2_idf
 pio run -e cli_esp32s2_idf5 -t upload
 pio device monitor -e cli_esp32s2_idf5
 
-# Native ESP-IDF full CLI, from examples/espidf_basic when idf.py is available
+# Native ESP-IDF CLI, from examples/espidf_basic when idf.py is available
 idf.py set-target esp32s3
 idf.py build
 ```
+
+The ESP-IDF example uses `app_main`, `esp_timer`, FreeRTOS, POSIX stdin, and
+fixed C buffers directly. It intentionally does not use Arduino compatibility
+facades. Its command set mirrors the Arduino CLI commands listed by `help`.
 
 Windows note for IDF5 envs: if package extraction fails due long paths, enable
 long paths in Windows or use a short PlatformIO core dir, for example:

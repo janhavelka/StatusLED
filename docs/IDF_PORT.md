@@ -169,17 +169,14 @@ If using the custom RMT backend only, omit the `led_strip` dependency.
 ## Example Plan
 
 - IDF example:
-  - `examples/espidf_basic/main/main.cpp` defines
-    `STATUSLED_EXAMPLE_PLATFORM_IDF`, includes
-    `examples/common/IdfArduinoCompat.h`, and then includes
-    `examples/01_status_led_cli/main.cpp`.
-  - The Arduino and ESP-IDF examples therefore expose the same help grouping,
-    colorized output, lifecycle commands, status/config views, stress mode,
-    mode/preset lists, and per-LED control commands.
-  - `IdfArduinoCompat.h` provides only the small example-local `Serial`,
-    `millis()`, `delay()`, `yield()`, and `F()` surface needed by the CLI.
-  - The ESP-IDF `app_main()` calls the shared `setup()` / `loop()` flow and
-    yields with `vTaskDelay()`.
+  - `examples/espidf_basic/main/main.cpp` is a native `app_main()` program.
+  - It uses `esp_timer_get_time()`, FreeRTOS delays, nonblocking POSIX stdin,
+    and fixed C buffers directly.
+  - It does not include Arduino sources and does not use a `Serial`/`millis`/
+    `delay` compatibility facade.
+  - The command names mirror the Arduino CLI: help/version, begin/end/stress,
+    info/status/config/last/list views, per-LED controls, all-LED controls, and
+    refresh.
 - Arduino example:
   - Keep existing Arduino examples and backend macros unchanged.
   - Add an Arduino build check after CMake files are added.
@@ -228,7 +225,7 @@ Completed locally:
 
 Pending in this shell:
 
-- `idf.py build` for the shared-source CLI in `examples/espidf_basic`
+- `idf.py build` for the native CLI in `examples/espidf_basic`
 - Hardware smoke, busy-path, and cleanup tests
 
 `idf.py` was not available on PATH during this implementation pass, so the

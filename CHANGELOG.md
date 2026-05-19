@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and last status.
 - ESP-IDF component metadata and a native `examples/espidf_basic` app using the
   IDF5 RMT backend.
+- Native ESP-IDF example contract checker that rejects Arduino compatibility
+  facades and enforces the fixed-buffer `app_main` CLI surface.
 - ESP-IDF port implementation notes.
 
 ### Changed
@@ -24,6 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PlatformIO metadata now declares ESP-IDF framework compatibility.
 - IDF5 RMT backend transmit state now uses backend-owned payload storage and an
   atomic callback handoff instead of a stack payload and volatile busy flag.
+- `examples/espidf_basic` now uses native ESP-IDF console glue instead of
+  including the Arduino-shaped CLI through a compatibility facade.
 
 ## [1.3.0] - 2026-03-01
 

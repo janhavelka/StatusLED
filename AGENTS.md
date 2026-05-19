@@ -120,6 +120,14 @@ void end();                          // Cleanup
 - Set exactly one `STATUSLED_BACKEND_*` macro to `1` (others `0`)
 - Backend code must not pull conflicting driver APIs into the binary
 
+### Framework Boundary and Native IDF Examples
+- Core/public headers and `src/StatusLed.cpp` must remain framework-neutral except for documented backend selection hooks.
+- Platform-specific code belongs in backend implementation files. Pure ESP-IDF component builds compile only the IDF5 RMT backend; Arduino/NeoPixelBus paths remain Arduino/PlatformIO-only.
+- The library owns LED protocol output only after `begin()`. Board pins and LED counts come from `Config`; examples may provide defaults in `examples/common/BoardPins.h`.
+- ESP-IDF examples must use native IDF APIs (`app_main`, `esp_timer`, FreeRTOS, fixed C buffers or native console APIs). Do not use Arduino compatibility facades in IDF examples.
+- Preserve or document Arduino/IDF CLI parity. If the native IDF CLI intentionally differs from the Arduino CLI, list the difference in README and `docs/IDF_PORT.md`.
+- Update `scripts/check_idf_example_contract.py` whenever the IDF example changes.
+
 ---
 
 ## Error Handling

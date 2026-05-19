@@ -18,7 +18,6 @@ Branch: `feature/statusled-idf-port`.
 - `examples/espidf_basic/CMakeLists.txt`
 - `examples/espidf_basic/main/CMakeLists.txt`
 - `examples/espidf_basic/main/main.cpp`
-- `examples/common/IdfArduinoCompat.h`
 - `scripts/check_idf_example_contract.py`
 
 ## Audit Resolution
@@ -37,15 +36,14 @@ Branch: `feature/statusled-idf-port`.
   - The transmit-done callback only clears the flag; normal code uses acquire
     loads before submitting a new frame.
 - Native IDF example:
-  - `app_main()` defines `STATUSLED_EXAMPLE_PLATFORM_IDF`, includes the
-    example-local Arduino compatibility layer, and includes
-    `examples/01_status_led_cli/main.cpp`.
-  - ESP-IDF now exposes the same help structure, ANSI coloring, lifecycle
-    commands, status/config views, mode/preset lists, stress controls, and
-    LED-control commands as the Arduino CLI.
-  - `scripts/check_idf_example_contract.py` statically guards the shared-source
-    include, required CMake dependencies, compatibility shim, and CLI command
-    surface.
+  - `app_main()` uses native ESP-IDF and POSIX APIs directly: `esp_timer`,
+    FreeRTOS delays, nonblocking `STDIN_FILENO`, and fixed C buffers.
+  - ESP-IDF exposes the same command categories and LED-control command names
+    as the Arduino CLI without including Arduino source or compatibility
+    facades.
+  - `scripts/check_idf_example_contract.py` statically guards required CMake
+    dependencies, native-IDF tokens, forbidden Arduino facade tokens, and the
+    CLI command surface.
 
 ## Remaining Hardware Checks
 

@@ -7,8 +7,6 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
-IDF_EXAMPLE_MACRO = "STATUSLED_EXAMPLE_PLATFORM_IDF"
-CLI_SOURCE_INCLUDE = '#include "examples/01_status_led_cli/main.cpp"'
 REQUIRED_EXAMPLE_COMPONENTS = [
     "StatusLED",
     "esp_timer",
@@ -18,17 +16,25 @@ REQUIRED_EXAMPLE_COMPONENTS = [
 REQUIRED_FILES = [
     "CMakeLists.txt",
     "idf_component.yml",
-    "examples/common/IdfArduinoCompat.h",
     "examples/espidf_basic/CMakeLists.txt",
     "examples/espidf_basic/main/CMakeLists.txt",
     "examples/espidf_basic/main/main.cpp",
 ]
-REQUIRED_COMPAT_TOKENS = [
-    "class IdfConsole",
+REQUIRED_NATIVE_TOKENS = [
+    'extern "C" void app_main(void)',
     "esp_timer_get_time",
     "fcntl",
     "STDIN_FILENO",
+    "::read",
     "vTaskDelay",
+]
+FORBIDDEN_IDF_TOKENS = [
+    "Arduino.h",
+    "IdfArduinoCompat",
+    "Serial",
+    "millis()",
+    "delay(",
+    "#include \"examples/01_status_led_cli/main.cpp\"",
 ]
 MANDATORY_COMMANDS = [
     "help",
@@ -78,12 +84,12 @@ def require_token(text: str, token: str, label: str) -> None:
 def require_command_dispatch(text: str, command: str) -> None:
     pattern = rf'strcmp\(\s*argv\[0\]\s*,\s*"{re.escape(command)}"\s*\)\s*==\s*0'
     if re.search(pattern, text) is None:
-        fail(f"CLI source missing command dispatch '{command}'")
+        fail(f"ESP-IDF main missing command dispatch '{command}'")
 
 
 def require_help_item(text: str, command: str) -> None:
-    if f'print_help_item("{command}' not in text:
-        fail(f"CLI source missing help item '{command}'")
+    if f'printHelpItem("{command}' not in text:
+        fail(f"ESP-IDF main missing help item '{command}'")
 
 
 def main() -> int:
@@ -93,12 +99,11 @@ def main() -> int:
     idf_main = (ROOT / "examples" / "espidf_basic" / "main" / "main.cpp").read_text(
         encoding="utf-8", errors="replace"
     )
-    require_token(idf_main, f"#define {IDF_EXAMPLE_MACRO} 1", "ESP-IDF main")
-    require_token(idf_main, '#include "examples/common/IdfArduinoCompat.h"', "ESP-IDF main")
-    require_token(idf_main, CLI_SOURCE_INCLUDE, "ESP-IDF main")
-    require_token(idf_main, 'extern "C" void app_main(void)', "ESP-IDF main")
-    require_token(idf_main, "setup();", "ESP-IDF main")
-    require_token(idf_main, "loop();", "ESP-IDF main")
+    for token in REQUIRED_NATIVE_TOKENS:
+        require_token(idf_main, token, "ESP-IDF main")
+    for token in FORBIDDEN_IDF_TOKENS:
+        if token in idf_main:
+            fail(f"ESP-IDF main must not use Arduino compatibility token '{token}'")
 
     cmake = (ROOT / "examples" / "espidf_basic" / "main" / "CMakeLists.txt").read_text(
         encoding="utf-8", errors="replace"
@@ -107,19 +112,9 @@ def main() -> int:
         if re.search(rf"\b{re.escape(component)}\b", cmake) is None:
             fail(f"ESP-IDF example CMake missing required component '{component}'")
 
-    compat = (ROOT / "examples" / "common" / "IdfArduinoCompat.h").read_text(
-        encoding="utf-8", errors="replace"
-    )
-    for token in REQUIRED_COMPAT_TOKENS:
-        require_token(compat, token, "IdfArduinoCompat.h")
-
-    cli = (ROOT / "examples" / "01_status_led_cli" / "main.cpp").read_text(
-        encoding="utf-8", errors="replace"
-    )
-    require_token(cli, f"defined({IDF_EXAMPLE_MACRO})", "shared CLI")
     for command in MANDATORY_COMMANDS:
-        require_command_dispatch(cli, command)
-        require_help_item(cli, command)
+        require_command_dispatch(idf_main, command)
+        require_help_item(idf_main, command)
 
     manifest = (ROOT / "idf_component.yml").read_text(encoding="utf-8", errors="replace")
     for token in ("esp32s2", "esp32s3", 'idf: ">=6.0.1"'):
