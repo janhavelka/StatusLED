@@ -8,6 +8,7 @@
 
 #include <Arduino.h>
 #include <ctype.h>
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -144,12 +145,13 @@ static bool parse_preset(const char* s, StatusLed::StatusPreset* out) {
 }
 
 static bool parse_u32(const char* s, uint32_t* out) {
-  if (!s || !*s) {
+  if (!s || !*s || !out) {
     return false;
   }
   char* end = nullptr;
+  errno = 0;
   const unsigned long val = strtoul(s, &end, 10);
-  if (end == s) {
+  if (errno != 0 || end == s || *end != '\0' || val > UINT32_MAX) {
     return false;
   }
   *out = static_cast<uint32_t>(val);
@@ -531,8 +533,10 @@ static void handle_command(char* line) {
     }
     if (argc > 1) {
       uint32_t idx = 0;
-      if (parse_u32(argv[1], &idx)) {
+      if (parse_u32(argv[1], &idx) && idx <= UINT8_MAX) {
         print_status_one(static_cast<uint8_t>(idx));
+      } else {
+        LOGE("invalid index");
       }
     } else {
       for (uint8_t i = 0; i < g_config.ledCount; ++i) {

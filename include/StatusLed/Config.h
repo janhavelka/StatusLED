@@ -13,8 +13,12 @@
 namespace StatusLed {
 
 /// @brief LED color byte order on the wire.
+/// @note Covers 24-bit WS2812/WS2812B-class parts only. RGBW parts such as
+///       SK6812RGBW are not supported: a white channel needs a fourth byte
+///       through the whole frame buffer. Uncommon BRG-ordered strips are not
+///       supported either.
 enum class ColorOrder : uint8_t {
-  GRB = 0,  ///< Green, Red, Blue (typical WS2812)
+  GRB = 0,  ///< Green, Red, Blue (WS2812, WS2812B, WS2812C, SK6812)
   RGB = 1   ///< Red, Green, Blue
 };
 

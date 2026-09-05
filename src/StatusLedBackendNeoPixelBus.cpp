@@ -8,6 +8,16 @@
 
 #if STATUSLED_BACKEND_NEOPIXELBUS
 
+#include <esp_idf_version.h>
+
+// NeoPixelBus drives the LEDs through the legacy <driver/rmt.h> API. The pinned
+// 2.7.6 needs Arduino-ESP32 2.x (ESP-IDF 4.4); 2.8.0 and later build on
+// ESP-IDF 5.x only through the deprecated RMT shim, and that shim is gone in
+// ESP-IDF 6.0. Fail here rather than deep inside the dependency.
+#if ESP_IDF_VERSION_MAJOR >= 5
+#error "STATUSLED_BACKEND_NEOPIXELBUS requires Arduino-ESP32 2.x (ESP-IDF 4.4). Select STATUSLED_BACKEND_IDF5_WS2812 instead."
+#endif
+
 #include <NeoPixelBus.h>
 #include <new>
 
@@ -97,22 +107,20 @@ class BackendNeoPixelBus final : public BackendBase {
     if (frame == nullptr) {
       return Status(Err::INVALID_CONFIG, 0, "frame must not be null");
     }
-    if (count == 0) {
-      return Status(Err::INVALID_CONFIG, 0, "count must be > 0");
-    }
-    if (count > _count) {
-      return Status(Err::INVALID_CONFIG, count, "count exceeds configured ledCount");
+    if (count == 0 || count > _count) {
+      return Status(Err::INVALID_CONFIG, count, "count out of range");
     }
     if (!_bus->canShow()) {
       return Status(Err::RESOURCE_BUSY, 0, "NeoPixelBus busy");
     }
 
-    // Driver order for NeoGrbFeature is GRB
-    const ColorOrder driverOrder = ColorOrder::GRB;
-
+    // NeoGrbFeature already emits green first, so a GRB strip takes the
+    // logical color unchanged. For an RGB strip, pre-swap red and green so the
+    // feature's GRB ordering puts them back in RGB order on the wire.
     for (uint8_t i = 0; i < count; ++i) {
-      const RgbColor mapped = mapColorOrder(frame[i], order, driverOrder);
-      _bus->setPixel(i, ::RgbColor(mapped.r, mapped.g, mapped.b));
+      const RgbColor& c = frame[i];
+      _bus->setPixel(i, (order == ColorOrder::GRB) ? ::RgbColor(c.r, c.g, c.b)
+                                                   : ::RgbColor(c.g, c.r, c.b));
     }
     _bus->show();
     return Ok();

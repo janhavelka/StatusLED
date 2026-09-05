@@ -72,7 +72,7 @@ const ModeNameMap MODES[] = {
     {"breathing", StatusLed::Mode::Breathing},
     {"heartbeat", StatusLed::Mode::Heartbeat},
     {"throb", StatusLed::Mode::Throb},
-    {"flickercandle", StatusLed::Mode::FlickerCandle},
+    {"flicker", StatusLed::Mode::FlickerCandle},
     {"glitch", StatusLed::Mode::Glitch},
     {"alternate", StatusLed::Mode::Alternate},
     {"sos", StatusLed::Mode::SOS},
@@ -88,11 +88,11 @@ const PresetNameMap PRESETS[] = {
     {"updating", StatusLed::StatusPreset::Updating},
     {"info", StatusLed::StatusPreset::Info},
     {"maintenance", StatusLed::StatusPreset::Maintenance},
-    {"alarmpolice", StatusLed::StatusPreset::AlarmPolice},
-    {"hazardamber", StatusLed::StatusPreset::HazardAmber},
+    {"police", StatusLed::StatusPreset::AlarmPolice},
+    {"hazard", StatusLed::StatusPreset::HazardAmber},
     {"success", StatusLed::StatusPreset::Success},
     {"connecting", StatusLed::StatusPreset::Connecting},
-    {"lowbattery", StatusLed::StatusPreset::LowBattery},
+    {"lowbat", StatusLed::StatusPreset::LowBattery},
 };
 
 uint32_t nowMs() {

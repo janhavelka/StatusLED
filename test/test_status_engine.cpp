@@ -483,7 +483,7 @@ static void test_sos_mode_pattern() {
   TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
   TEST_ASSERT_EQUAL_UINT8(0, snap.intensity);
 
-  // Run through a full SOS cycle (~4200ms) and verify it keeps going
+  // Run through a full SOS cycle (3400 ms) and verify it keeps going
   bool saw_on = false;
   bool saw_off = false;
   for (uint32_t t = 4300; t < 8500; t += 50) {
@@ -607,6 +607,434 @@ static void test_set_all_color_applies_to_all() {
   leds.end();
 }
 
+// ---------------------------------------------------------------------------
+// Regression tests for the v1.4.0 engine fixes
+// ---------------------------------------------------------------------------
+
+// A uint8_t phase counter used to be incremented without bound and reduced
+// with "% tableLength". For tables whose length does not divide 256 the
+// sequence jumped at the 255->0 wrap, corrupting the pattern roughly once a
+// minute. SOS (18 steps) is the worst case.
+static void test_sos_pattern_survives_phase_counter_wrap() {
+  StatusLed::StatusLed leds;
+  TEST_ASSERT_TRUE(leds.begin(make_config()).ok());
+
+  leds.setMode(0, StatusLed::Mode::SOS);
+  leds.setColor(0, StatusLed::RgbColor(255, 0, 0));
+
+  static const uint32_t kStepMs[18] = {100, 100, 100, 100, 100, 300, 300, 100, 300,
+                                       100, 300, 300, 100, 100, 100, 100, 100, 700};
+
+  StatusLed::LedSnapshot snap;
+  leds.tick(0);
+  TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+  uint8_t current = snap.intensity;
+  uint32_t segment_start = 0;
+  uint32_t segment_index = 0;
+
+  for (uint32_t t = 1; t <= 60000; ++t) {
+    leds.tick(t);
+    TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+    if (snap.intensity != current) {
+      TEST_ASSERT_EQUAL_UINT32(kStepMs[segment_index % 18], t - segment_start);
+      ++segment_index;
+      segment_start = t;
+      current = snap.intensity;
+    }
+  }
+
+  // 60 s is ~17 SOS cycles, well past the 256th step where the wrap occurred.
+  TEST_ASSERT_GREATER_THAN_UINT32(300, segment_index);
+}
+
+static void test_triple_blink_survives_phase_counter_wrap() {
+  StatusLed::StatusLed leds;
+  TEST_ASSERT_TRUE(leds.begin(make_config()).ok());
+
+  leds.setMode(0, StatusLed::Mode::TripleBlink);
+  leds.setColor(0, StatusLed::RgbColor(255, 255, 255));
+
+  static const uint32_t kStepMs[6] = {90, 90, 90, 90, 90, 600};
+
+  StatusLed::LedSnapshot snap;
+  leds.tick(0);
+  TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+  uint8_t current = snap.intensity;
+  uint32_t segment_start = 0;
+  uint32_t segment_index = 0;
+
+  for (uint32_t t = 1; t <= 60000; ++t) {
+    leds.tick(t);
+    TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+    if (snap.intensity != current) {
+      TEST_ASSERT_EQUAL_UINT32(kStepMs[segment_index % 6], t - segment_start);
+      ++segment_index;
+      segment_start = t;
+      current = snap.intensity;
+    }
+  }
+
+  TEST_ASSERT_GREATER_THAN_UINT32(300, segment_index);
+}
+
+// clearTemporary() used to return early when a second temporary preset was
+// queued, leaving the active one running forever.
+static void test_clear_temporary_cancels_active_while_another_is_pending() {
+  StatusLed::StatusLed leds;
+  TEST_ASSERT_TRUE(leds.begin(make_config()).ok());
+
+  leds.setPreset(0, StatusLed::StatusPreset::Ready);
+  leds.tick(0);
+  leds.setTemporaryPreset(0, StatusLed::StatusPreset::Error, 5000);
+  leds.tick(10);
+
+  StatusLed::LedSnapshot snap;
+  TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+  TEST_ASSERT_TRUE(snap.tempActive);
+
+  // Queue a second overlay on top of the active one, then cancel everything.
+  leds.setTemporaryPreset(0, StatusLed::StatusPreset::Critical, 5000);
+  TEST_ASSERT_TRUE(leds.clearTemporary(0).ok());
+  leds.tick(20);
+
+  TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+  TEST_ASSERT_FALSE(snap.tempActive);
+  TEST_ASSERT_FALSE(snap.tempPending);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(StatusLed::StatusPreset::Ready),
+                          static_cast<uint8_t>(snap.preset));
+
+  leds.end();
+}
+
+// A finished one-shot fade must not restart when a temporary preset expires.
+static void test_temporary_preset_does_not_replay_finished_fade() {
+  StatusLed::StatusLed leds;
+  TEST_ASSERT_TRUE(leds.begin(make_config()).ok());
+
+  leds.setColor(0, StatusLed::RgbColor(255, 255, 255));
+  leds.setMode(0, StatusLed::Mode::FadeOut);
+  const StatusLed::ModeParams defaults =
+      StatusLed::StatusLed::getModeDefaults(StatusLed::Mode::FadeOut);
+
+  for (uint32_t t = 0; t <= defaults.fallMs + 100; t += 20) {
+    leds.tick(t);
+  }
+
+  StatusLed::LedSnapshot snap;
+  TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+  TEST_ASSERT_EQUAL_UINT8(0, snap.intensity);
+
+  const uint32_t base = defaults.fallMs + 120;
+  leds.setTemporaryPreset(0, StatusLed::StatusPreset::Error, 200);
+  leds.tick(base);
+  TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+  TEST_ASSERT_TRUE(snap.tempActive);
+
+  leds.tick(base + 250);
+  TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+  TEST_ASSERT_FALSE(snap.tempActive);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(StatusLed::Mode::FadeOut),
+                          static_cast<uint8_t>(snap.mode));
+  TEST_ASSERT_EQUAL_UINT8(255, snap.color.r);
+  // The fade had already completed, so it must stay dark instead of restarting.
+  TEST_ASSERT_EQUAL_UINT8(0, snap.intensity);
+
+  leds.tick(base + 500);
+  TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+  TEST_ASSERT_EQUAL_UINT8(0, snap.intensity);
+
+  leds.end();
+}
+
+// onMs == periodMs (or 0) used to emit a zero-length phase every period,
+// which blipped the LED and retransmitted the frame twice per period.
+static void test_blink_with_degenerate_duty_is_static() {
+  StatusLed::StatusLed leds;
+  TEST_ASSERT_TRUE(leds.begin(make_config()).ok());
+
+  StatusLed::ModeParams always_on;
+  always_on.periodMs = 100;
+  always_on.onMs = 100;
+  leds.setMode(0, StatusLed::Mode::BlinkSlow, always_on);
+
+  StatusLed::LedSnapshot snap;
+  for (uint32_t t = 0; t <= 1000; t += 5) {
+    leds.tick(t);
+    TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+    TEST_ASSERT_EQUAL_UINT8(255, snap.intensity);
+  }
+
+  StatusLed::ModeParams always_off;
+  always_off.periodMs = 100;
+  always_off.onMs = 0;
+  leds.setMode(0, StatusLed::Mode::BlinkSlow, always_off);
+
+  for (uint32_t t = 1000; t <= 2000; t += 5) {
+    leds.tick(t);
+    TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+    TEST_ASSERT_EQUAL_UINT8(0, snap.intensity);
+  }
+
+  leds.end();
+}
+
+// Strobe and Beacon are duty-cycle modes now, so ModeParams must apply.
+static void test_strobe_and_beacon_honour_mode_params() {
+  StatusLed::StatusLed leds;
+  TEST_ASSERT_TRUE(leds.begin(make_config()).ok());
+
+  StatusLed::ModeParams params;
+  params.periodMs = 400;
+  params.onMs = 200;
+  leds.setMode(0, StatusLed::Mode::Strobe, params);
+
+  StatusLed::LedSnapshot snap;
+  leds.tick(0);
+  TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+  TEST_ASSERT_EQUAL_UINT8(255, snap.intensity);
+
+  leds.tick(199);
+  TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+  TEST_ASSERT_EQUAL_UINT8(255, snap.intensity);
+
+  leds.tick(200);
+  TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+  TEST_ASSERT_EQUAL_UINT8(0, snap.intensity);
+
+  leds.tick(400);
+  TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+  TEST_ASSERT_EQUAL_UINT8(255, snap.intensity);
+
+  const StatusLed::ModeParams beacon =
+      StatusLed::StatusLed::getModeDefaults(StatusLed::Mode::Beacon);
+  TEST_ASSERT_EQUAL_UINT16(4000, beacon.periodMs);
+  TEST_ASSERT_EQUAL_UINT16(80, beacon.onMs);
+
+  leds.end();
+}
+
+// minLevel/maxLevel are documented as the output bounds; easing used to be
+// applied after the interpolation, so Breathing ignored minLevel entirely.
+static void test_pulse_modes_respect_level_bounds() {
+  StatusLed::StatusLed leds;
+  TEST_ASSERT_TRUE(leds.begin(make_config()).ok());
+
+  StatusLed::ModeParams params;
+  params.periodMs = 3000;
+  params.minLevel = 20;
+  params.maxLevel = 200;
+  leds.setMode(0, StatusLed::Mode::Breathing, params);
+
+  StatusLed::LedSnapshot snap;
+  uint8_t lowest = 255;
+  uint8_t highest = 0;
+  for (uint32_t t = 0; t <= 6000; t += 10) {
+    leds.tick(t);
+    TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+    if (snap.intensity < lowest) lowest = snap.intensity;
+    if (snap.intensity > highest) highest = snap.intensity;
+  }
+  TEST_ASSERT_EQUAL_UINT8(20, lowest);
+  TEST_ASSERT_EQUAL_UINT8(200, highest);
+
+  leds.end();
+}
+
+// Pulse phase used to be derived from absolute time, so a mode set at an
+// arbitrary moment started mid-cycle.
+static void test_pulse_starts_at_minimum_level() {
+  StatusLed::StatusLed leds;
+  TEST_ASSERT_TRUE(leds.begin(make_config()).ok());
+
+  leds.tick(7777);
+  leds.setMode(0, StatusLed::Mode::PulseSharp);
+  leds.tick(7777);
+
+  StatusLed::LedSnapshot snap;
+  TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+  TEST_ASSERT_EQUAL_UINT8(0, snap.intensity);
+
+  leds.end();
+}
+
+// Repeating deadlines advance from the previous deadline, so a slow caller
+// does not stretch the cadence.
+static void test_blink_cadence_does_not_drift_with_slow_ticks() {
+  StatusLed::StatusLed leds;
+  TEST_ASSERT_TRUE(leds.begin(make_config()).ok());
+
+  leds.setMode(0, StatusLed::Mode::BlinkFast);  // 250 ms period, 125 ms on
+
+  StatusLed::LedSnapshot snap;
+  leds.tick(0);
+  TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+  uint8_t current = snap.intensity;
+  uint32_t toggles = 0;
+  for (uint32_t t = 40; t <= 10000; t += 40) {
+    leds.tick(t);
+    TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+    if (snap.intensity != current) {
+      ++toggles;
+      current = snap.intensity;
+    }
+  }
+  // 10 s / 125 ms = 80 half-periods; latency must not eat more than a couple.
+  TEST_ASSERT_GREATER_THAN_UINT32(77, toggles);
+
+  leds.end();
+}
+
+// Explicit state changes take precedence over a running temporary preset.
+static void test_set_mode_and_color_cancel_temporary_preset() {
+  StatusLed::StatusLed leds;
+  TEST_ASSERT_TRUE(leds.begin(make_config()).ok());
+
+  leds.setPreset(0, StatusLed::StatusPreset::Ready);
+  leds.tick(0);
+  leds.setTemporaryPreset(0, StatusLed::StatusPreset::Error, 5000);
+  leds.tick(10);
+
+  StatusLed::LedSnapshot snap;
+  TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+  TEST_ASSERT_TRUE(snap.tempActive);
+
+  leds.setMode(0, StatusLed::Mode::Solid);
+  leds.setColor(0, StatusLed::RgbColor(1, 2, 3));
+  leds.tick(20);
+
+  TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+  TEST_ASSERT_FALSE(snap.tempActive);
+
+  // The temporary preset must not come back and overwrite the new state.
+  leds.tick(6000);
+  TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(StatusLed::Mode::Solid),
+                          static_cast<uint8_t>(snap.mode));
+  TEST_ASSERT_EQUAL_UINT8(1, snap.color.r);
+  TEST_ASSERT_EQUAL_UINT8(2, snap.color.g);
+  TEST_ASSERT_EQUAL_UINT8(3, snap.color.b);
+
+  leds.end();
+}
+
+// Per-LED brightness is independent of the temporary-preset overlay.
+static void test_brightness_survives_temporary_preset_revert() {
+  StatusLed::StatusLed leds;
+  TEST_ASSERT_TRUE(leds.begin(make_config()).ok());
+
+  leds.setPreset(0, StatusLed::StatusPreset::Ready);
+  leds.tick(0);
+  leds.setTemporaryPreset(0, StatusLed::StatusPreset::Error, 200);
+  leds.tick(10);
+  leds.setBrightness(0, 77);
+  leds.tick(300);
+
+  StatusLed::LedSnapshot snap;
+  TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+  TEST_ASSERT_FALSE(snap.tempActive);
+  TEST_ASSERT_EQUAL_UINT8(77, snap.brightness);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(StatusLed::StatusPreset::Ready),
+                          static_cast<uint8_t>(snap.preset));
+
+  leds.end();
+}
+
+// A default preset must never override a running mode or a temporary preset.
+static void test_default_preset_does_not_override_active_states() {
+  StatusLed::StatusLed leds;
+  TEST_ASSERT_TRUE(leds.begin(make_config()).ok());
+
+  leds.setPreset(0, StatusLed::StatusPreset::Ready);
+  leds.tick(0);
+  TEST_ASSERT_TRUE(leds.setDefaultPreset(0, StatusLed::StatusPreset::Info).ok());
+
+  StatusLed::LedSnapshot snap;
+  TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(StatusLed::StatusPreset::Ready),
+                          static_cast<uint8_t>(snap.preset));
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(StatusLed::StatusPreset::Info),
+                          static_cast<uint8_t>(snap.defaultPreset));
+
+  // While a temporary preset runs, the LED is not idle either.
+  leds.setTemporaryPreset(0, StatusLed::StatusPreset::Critical, 5000);
+  leds.tick(10);
+  TEST_ASSERT_TRUE(leds.setDefaultPreset(0, StatusLed::StatusPreset::Warning).ok());
+  leds.tick(20);
+  TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+  TEST_ASSERT_TRUE(snap.tempActive);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(StatusLed::StatusPreset::Critical),
+                          static_cast<uint8_t>(snap.preset));
+
+  leds.end();
+}
+
+// clear() is documented as a full state reset.
+static void test_clear_resets_brightness_and_intensity() {
+  StatusLed::StatusLed leds;
+  TEST_ASSERT_TRUE(leds.begin(make_config()).ok());
+
+  leds.setPreset(0, StatusLed::StatusPreset::Ready);
+  leds.setBrightness(0, 33);
+  leds.setDefaultPreset(0, StatusLed::StatusPreset::Info);
+  leds.tick(0);
+
+  TEST_ASSERT_TRUE(leds.clear().ok());
+
+  StatusLed::LedSnapshot snap;
+  TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+  TEST_ASSERT_EQUAL_UINT8(255, snap.brightness);
+  TEST_ASSERT_EQUAL_UINT8(0, snap.intensity);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(StatusLed::StatusPreset::Off),
+                          static_cast<uint8_t>(snap.defaultPreset));
+
+  leds.end();
+}
+
+// A queued temporary preset is visible before it activates.
+static void test_snapshot_reports_pending_temporary_preset() {
+  StatusLed::StatusLed leds;
+  TEST_ASSERT_TRUE(leds.begin(make_config()).ok());
+
+  leds.setPreset(0, StatusLed::StatusPreset::Ready);
+  leds.tick(0);
+  leds.setTemporaryPreset(0, StatusLed::StatusPreset::Success, 100);
+
+  StatusLed::LedSnapshot snap;
+  TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+  TEST_ASSERT_TRUE(snap.tempPending);
+  TEST_ASSERT_FALSE(snap.tempActive);
+
+  leds.tick(10);
+  TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+  TEST_ASSERT_FALSE(snap.tempPending);
+  TEST_ASSERT_TRUE(snap.tempActive);
+
+  leds.end();
+}
+
+// FadeIn/FadeOut are documented to use minLevel/maxLevel as their endpoints.
+static void test_fade_uses_level_bounds() {
+  StatusLed::StatusLed leds;
+  TEST_ASSERT_TRUE(leds.begin(make_config()).ok());
+
+  StatusLed::ModeParams params;
+  params.riseMs = 500;
+  params.minLevel = 40;
+  params.maxLevel = 180;
+  leds.setMode(0, StatusLed::Mode::FadeIn, params);
+
+  StatusLed::LedSnapshot snap;
+  leds.tick(0);
+  TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+  TEST_ASSERT_EQUAL_UINT8(40, snap.intensity);
+
+  leds.tick(600);
+  TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+  TEST_ASSERT_EQUAL_UINT8(180, snap.intensity);
+
+  leds.end();
+}
+
 void setUp() {}
 void tearDown() {}
 
@@ -640,5 +1068,20 @@ int main(int, char**) {
   RUN_TEST(test_set_all_mode_applies_to_all);
   RUN_TEST(test_set_all_mode_rejects_invalid);
   RUN_TEST(test_set_all_color_applies_to_all);
+  RUN_TEST(test_sos_pattern_survives_phase_counter_wrap);
+  RUN_TEST(test_triple_blink_survives_phase_counter_wrap);
+  RUN_TEST(test_clear_temporary_cancels_active_while_another_is_pending);
+  RUN_TEST(test_temporary_preset_does_not_replay_finished_fade);
+  RUN_TEST(test_blink_with_degenerate_duty_is_static);
+  RUN_TEST(test_strobe_and_beacon_honour_mode_params);
+  RUN_TEST(test_pulse_modes_respect_level_bounds);
+  RUN_TEST(test_pulse_starts_at_minimum_level);
+  RUN_TEST(test_blink_cadence_does_not_drift_with_slow_ticks);
+  RUN_TEST(test_set_mode_and_color_cancel_temporary_preset);
+  RUN_TEST(test_brightness_survives_temporary_preset_revert);
+  RUN_TEST(test_default_preset_does_not_override_active_states);
+  RUN_TEST(test_clear_resets_brightness_and_intensity);
+  RUN_TEST(test_snapshot_reports_pending_temporary_preset);
+  RUN_TEST(test_fade_uses_level_bounds);
   return UNITY_END();
 }

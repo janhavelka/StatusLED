@@ -1,6 +1,11 @@
 /**
  * @file StatusLed.cpp
- * @brief Implementation of StatusLed.
+ * @brief Implementation of the StatusLed animation engine.
+ *
+ * The engine is framework-neutral: it owns per-LED state, computes an
+ * intensity for each LED from the current mode and the caller-supplied
+ * timestamp, renders the resulting frame, and hands it to the compile-time
+ * selected backend only when a pixel value actually changed.
  */
 
 #include "StatusLed/StatusLed.h"
@@ -12,27 +17,46 @@
 namespace StatusLed {
 namespace {
 
-static constexpr uint8_t kMaxLeds = StatusLed::kMaxLedCount;
-static constexpr uint8_t kDimLevel = 48;  // ~19% brightness
-static constexpr uint16_t kMinSmoothStepMs = 5;
-static constexpr uint16_t kMaxSmoothStepMs = 1000;
-static constexpr uint32_t kMaxDurationMs = 0x7FFFFFFFu;
-static constexpr int kMaxDataPin = 255;
+constexpr uint8_t kMaxLeds = StatusLed::kMaxLedCount;
+constexpr uint8_t kDimLevel = 48;  // ~19% of full intensity
+constexpr uint16_t kMinSmoothStepMs = 5;
+constexpr uint16_t kMaxSmoothStepMs = 1000;
+constexpr uint16_t kMinPeriodMs = 2;
+constexpr uint32_t kMaxDurationMs = 0x7FFFFFFFu;
+constexpr int kMaxDataPin = 255;
+constexpr uint8_t kMaxRmtChannel = 3;
 
+// FlickerCandle stays in a warm, always-lit band; Glitch drops out entirely.
+constexpr uint8_t kFlickerBase = 140;
+constexpr uint8_t kFlickerSpan = 100;
+constexpr uint8_t kGlitchOffThreshold = 30;
+constexpr uint16_t kRandomMinStepMs = 30;
+constexpr uint16_t kRandomStepSpanMs = 60;
+
+// 16-bit Galois LFSR (x^16 + x^14 + x^13 + x^11 + 1) used by the random modes.
+constexpr uint32_t kLfsrSeed = 0xACE1u;
+constexpr uint32_t kLfsrTaps = 0xB400u;
+
+template <typename T, size_t N>
+constexpr uint8_t countOf(const T (&)[N]) {
+  return static_cast<uint8_t>(N);
+}
+
+/// @brief One step of a fixed-timing pattern.
 struct PatternStep {
   uint16_t durationMs;
   uint8_t intensity;
   bool useAlt;
 };
 
-static constexpr PatternStep kPatternDoubleBlink[] = {
+constexpr PatternStep kPatternDoubleBlink[] = {
   {120, 255, false},
   {120, 0, false},
   {120, 255, false},
   {600, 0, false},
 };
 
-static constexpr PatternStep kPatternTripleBlink[] = {
+constexpr PatternStep kPatternTripleBlink[] = {
   {90, 255, false},
   {90, 0, false},
   {90, 255, false},
@@ -41,82 +65,93 @@ static constexpr PatternStep kPatternTripleBlink[] = {
   {600, 0, false},
 };
 
-static constexpr PatternStep kPatternBeacon[] = {
-  {80, 255, false},
-  {3920, 0, false},
-};
-
-static constexpr PatternStep kPatternStrobe[] = {
-  {50, 255, false},
-  {50, 0, false},
-};
-
-static constexpr PatternStep kPatternHeartbeat[] = {
+constexpr PatternStep kPatternHeartbeat[] = {
   {70, 255, false},
   {70, 0, false},
   {70, 200, false},
   {600, 0, false},
 };
 
-static constexpr PatternStep kPatternPolice[] = {
+// Alternate: primary, gap, secondary, gap.
+constexpr PatternStep kPatternAlternate[] = {
   {120, 255, false},
   {60, 0, false},
   {120, 255, true},
   {400, 0, false},
 };
 
-static constexpr PatternStep kPatternSOS[] = {
-  // S: ...
+// Morse SOS: ... --- ... followed by a word gap. Total cycle 3400 ms.
+constexpr PatternStep kPatternSOS[] = {
   {100, 255, false}, {100, 0, false},
   {100, 255, false}, {100, 0, false},
   {100, 255, false}, {300, 0, false},
-  // O: ---
   {300, 255, false}, {100, 0, false},
   {300, 255, false}, {100, 0, false},
   {300, 255, false}, {300, 0, false},
-  // S: ...
   {100, 255, false}, {100, 0, false},
   {100, 255, false}, {100, 0, false},
   {100, 255, false}, {700, 0, false},
 };
+
+/// @brief A fixed-timing pattern: a step table walked one entry per deadline.
+struct Pattern {
+  const PatternStep* steps;
+  uint8_t count;
+};
+
+/// @brief Look up the fixed pattern of a mode, or {nullptr, 0} if it has none.
+Pattern patternFor(Mode mode) {
+  switch (mode) {
+    case Mode::DoubleBlink:
+      return {kPatternDoubleBlink, countOf(kPatternDoubleBlink)};
+    case Mode::TripleBlink:
+      return {kPatternTripleBlink, countOf(kPatternTripleBlink)};
+    case Mode::Heartbeat:
+      return {kPatternHeartbeat, countOf(kPatternHeartbeat)};
+    case Mode::Alternate:
+      return {kPatternAlternate, countOf(kPatternAlternate)};
+    case Mode::SOS:
+      return {kPatternSOS, countOf(kPatternSOS)};
+    default:
+      return {nullptr, 0};
+  }
+}
 
 struct PresetDef {
   StatusPreset preset;
   Mode mode;
   RgbColor primary;
   RgbColor secondary;
-  bool useSecondary;
 };
 
-static constexpr RgbColor kColorOff(0, 0, 0);
-static constexpr RgbColor kColorGreen(0, 255, 0);
-static constexpr RgbColor kColorOrange(255, 128, 0);
-static constexpr RgbColor kColorAmber(255, 180, 0);
-static constexpr RgbColor kColorRed(255, 0, 0);
-static constexpr RgbColor kColorCyan(0, 255, 255);
-static constexpr RgbColor kColorBlue(0, 0, 255);
-static constexpr RgbColor kColorPurple(128, 0, 255);
-static constexpr RgbColor kColorWhite(255, 255, 255);
+constexpr RgbColor kColorOff(0, 0, 0);
+constexpr RgbColor kColorGreen(0, 255, 0);
+constexpr RgbColor kColorOrange(255, 128, 0);
+constexpr RgbColor kColorAmber(255, 180, 0);
+constexpr RgbColor kColorRed(255, 0, 0);
+constexpr RgbColor kColorCyan(0, 255, 255);
+constexpr RgbColor kColorBlue(0, 0, 255);
+constexpr RgbColor kColorPurple(128, 0, 255);
 
-static constexpr PresetDef kPresets[] = {
-  {StatusPreset::Off, Mode::Off, kColorOff, kColorOff, false},
-  {StatusPreset::Ready, Mode::Solid, kColorGreen, kColorOff, false},
-  {StatusPreset::Busy, Mode::PulseSoft, kColorOrange, kColorOff, false},
-  {StatusPreset::Warning, Mode::BlinkSlow, kColorAmber, kColorOff, false},
-  {StatusPreset::Error, Mode::BlinkFast, kColorRed, kColorOff, false},
-  {StatusPreset::Critical, Mode::Strobe, kColorRed, kColorOff, false},
-  {StatusPreset::Updating, Mode::Breathing, kColorCyan, kColorOff, false},
-  {StatusPreset::Info, Mode::Solid, kColorBlue, kColorOff, false},
-  {StatusPreset::Maintenance, Mode::DoubleBlink, kColorPurple, kColorOff, false},
-  {StatusPreset::AlarmPolice, Mode::Alternate, kColorRed, kColorBlue, true},
-  {StatusPreset::HazardAmber, Mode::DoubleBlink, kColorAmber, kColorOff, false},
-  {StatusPreset::Success, Mode::DoubleBlink, kColorGreen, kColorOff, false},
-  {StatusPreset::Connecting, Mode::PulseSoft, kColorBlue, kColorOff, false},
-  {StatusPreset::LowBattery, Mode::Beacon, kColorRed, kColorOff, false},
+constexpr PresetDef kPresets[] = {
+  {StatusPreset::Off, Mode::Off, kColorOff, kColorOff},
+  {StatusPreset::Ready, Mode::Solid, kColorGreen, kColorOff},
+  {StatusPreset::Busy, Mode::PulseSoft, kColorOrange, kColorOff},
+  {StatusPreset::Warning, Mode::BlinkSlow, kColorAmber, kColorOff},
+  {StatusPreset::Error, Mode::BlinkFast, kColorRed, kColorOff},
+  {StatusPreset::Critical, Mode::Strobe, kColorRed, kColorOff},
+  {StatusPreset::Updating, Mode::Breathing, kColorCyan, kColorOff},
+  {StatusPreset::Info, Mode::Solid, kColorBlue, kColorOff},
+  {StatusPreset::Maintenance, Mode::DoubleBlink, kColorPurple, kColorOff},
+  {StatusPreset::AlarmPolice, Mode::Alternate, kColorRed, kColorBlue},
+  {StatusPreset::HazardAmber, Mode::DoubleBlink, kColorAmber, kColorOff},
+  {StatusPreset::Success, Mode::DoubleBlink, kColorGreen, kColorOff},
+  {StatusPreset::Connecting, Mode::PulseSoft, kColorBlue, kColorOff},
+  {StatusPreset::LowBattery, Mode::Beacon, kColorRed, kColorOff},
 };
 
-static const PresetDef* findPreset(StatusPreset preset) {
-  for (size_t i = 0; i < (sizeof(kPresets) / sizeof(kPresets[0])); ++i) {
+const PresetDef* findPreset(StatusPreset preset) {
+  for (uint8_t i = 0; i < countOf(kPresets); ++i) {
     if (kPresets[i].preset == preset) {
       return &kPresets[i];
     }
@@ -124,32 +159,48 @@ static const PresetDef* findPreset(StatusPreset preset) {
   return nullptr;
 }
 
-static bool timeReached(uint32_t now, uint32_t target) {
+/// @brief Wraparound-safe "now is at or past target" test.
+/// @note Treats the nearer half of the 32-bit range as the past, so it stays
+///       correct across the ~49.7 day millisecond wrap.
+bool timeReached(uint32_t now, uint32_t target) {
   return static_cast<uint32_t>(now - target) < 0x80000000u;
 }
 
-static uint8_t scale8(uint8_t value, uint8_t scale) {
+/// @brief Next deadline for a repeating step, without long-term drift.
+/// @note Advances from the previous deadline so tick latency does not
+///       accumulate, but resynchronizes to now when the deadline is already in
+///       the past, so a stalled loop never bursts through missed steps.
+uint32_t nextDeadline(uint32_t previous, uint32_t now, uint16_t durationMs) {
+  const uint32_t scheduled = previous + durationMs;
+  return timeReached(now, scheduled) ? (now + durationMs) : scheduled;
+}
+
+/// @brief Scale a 0..255 value by a 0..255 factor, rounding to nearest.
+uint8_t scale8(uint8_t value, uint8_t scale) {
   return static_cast<uint8_t>((static_cast<uint16_t>(value) * scale + 127) / 255);
 }
 
-static uint8_t ease8InOut(uint8_t x) {
+/// @brief Symmetric ease-in/ease-out shaping of a 0..255 position.
+uint8_t ease8InOut(uint8_t x) {
   uint8_t y = x;
   if (x & 0x80) {
-    y = 255 - x;
+    y = static_cast<uint8_t>(255 - x);
   }
   uint16_t z = static_cast<uint16_t>(y) * static_cast<uint16_t>(y);
-  z = z >> 7;
-  uint8_t out = static_cast<uint8_t>(z > 255 ? 255 : z);
+  z = static_cast<uint16_t>(z >> 7);
+  const uint8_t out = static_cast<uint8_t>(z > 255 ? 255 : z);
   return (x & 0x80) ? static_cast<uint8_t>(255 - out) : out;
 }
 
-static uint8_t lerpU8(uint8_t minVal, uint8_t maxVal, uint16_t pos, uint16_t span) {
+/// @brief Linear interpolation from minVal to maxVal at pos/span.
+/// @note Handles maxVal < minVal (descending ramps) and clamps to 0..255.
+uint8_t lerpU8(uint8_t minVal, uint8_t maxVal, uint16_t pos, uint16_t span) {
   if (span == 0) {
     return maxVal;
   }
   const int32_t delta = static_cast<int32_t>(maxVal) - static_cast<int32_t>(minVal);
-  const int32_t scaled = (delta * static_cast<int32_t>(pos)) / static_cast<int32_t>(span);
-  const int32_t out = static_cast<int32_t>(minVal) + scaled;
+  const int32_t out =
+      static_cast<int32_t>(minVal) + ((delta * static_cast<int32_t>(pos)) / static_cast<int32_t>(span));
   if (out < 0) {
     return 0;
   }
@@ -159,11 +210,11 @@ static uint8_t lerpU8(uint8_t minVal, uint8_t maxVal, uint16_t pos, uint16_t spa
   return static_cast<uint8_t>(out);
 }
 
-static uint8_t safeLedCount(uint8_t count) {
+uint8_t safeLedCount(uint8_t count) {
   return (count <= kMaxLeds) ? count : kMaxLeds;
 }
 
-static bool isValidColorOrder(ColorOrder order) {
+bool isValidColorOrder(ColorOrder order) {
   switch (order) {
     case ColorOrder::GRB:
     case ColorOrder::RGB:
@@ -173,28 +224,7 @@ static bool isValidColorOrder(ColorOrder order) {
   }
 }
 
-static ModeParams sanitizeParams(Mode mode, ModeParams params) {
-  if (params.periodMs < 2) {
-    params.periodMs = 2;
-  }
-  if (params.onMs > params.periodMs) {
-    params.onMs = params.periodMs;
-  }
-  if (params.maxLevel < params.minLevel) {
-    const uint8_t tmp = params.maxLevel;
-    params.maxLevel = params.minLevel;
-    params.minLevel = tmp;
-  }
-  if (mode == Mode::FadeIn && params.riseMs == 0) {
-    params.riseMs = 1;
-  }
-  if (mode == Mode::FadeOut && params.fallMs == 0) {
-    params.fallMs = 1;
-  }
-  return params;
-}
-
-static bool isValidMode(Mode mode) {
+bool isValidMode(Mode mode) {
   switch (mode) {
     case Mode::Off:
     case Mode::Solid:
@@ -222,7 +252,33 @@ static bool isValidMode(Mode mode) {
   }
 }
 
+/// @brief Force mode parameters into a range the engine can render.
+ModeParams sanitizeParams(Mode mode, ModeParams params) {
+  if (params.periodMs < kMinPeriodMs) {
+    params.periodMs = kMinPeriodMs;
+  }
+  if (params.onMs > params.periodMs) {
+    params.onMs = params.periodMs;
+  }
+  if (params.maxLevel < params.minLevel) {
+    const uint8_t tmp = params.maxLevel;
+    params.maxLevel = params.minLevel;
+    params.minLevel = tmp;
+  }
+  if (mode == Mode::FadeIn && params.riseMs == 0) {
+    params.riseMs = 1;
+  }
+  if (mode == Mode::FadeOut && params.fallMs == 0) {
+    params.fallMs = 1;
+  }
+  return params;
+}
+
 }  // namespace
+
+// ---------------------------------------------------------------------------
+// Lifecycle
+// ---------------------------------------------------------------------------
 
 Status StatusLed::begin(const Config& config) {
   if (config.dataPin < 0 || config.dataPin > kMaxDataPin) {
@@ -232,9 +288,10 @@ Status StatusLed::begin(const Config& config) {
     return setLast(Status(Err::INVALID_CONFIG, config.ledCount, "ledCount out of range"));
   }
   if (!isValidColorOrder(config.colorOrder)) {
-    return setLast(Status(Err::INVALID_CONFIG, static_cast<int32_t>(config.colorOrder), "invalid colorOrder"));
+    return setLast(
+        Status(Err::INVALID_CONFIG, static_cast<int32_t>(config.colorOrder), "invalid colorOrder"));
   }
-  if (config.rmtChannel > 3) {
+  if (config.rmtChannel > kMaxRmtChannel) {
     return setLast(Status(Err::INVALID_CONFIG, config.rmtChannel, "rmtChannel out of range"));
   }
   if (config.smoothStepMs < kMinSmoothStepMs || config.smoothStepMs > kMaxSmoothStepMs) {
@@ -243,15 +300,16 @@ Status StatusLed::begin(const Config& config) {
 
   end();
 
-  _config = config;
   _lastTickMs = 0;
   _timeSynced = false;
   _frameDirty = false;
 
   for (uint8_t i = 0; i < kMaxLeds; ++i) {
     _leds[i] = LedState();
-    const uint32_t seed = (0xACE1u ^ (static_cast<uint32_t>(i) * 179u)) & 0xFFFFu;
-    _leds[i].lfsr = seed ? seed : 0xACE1u;
+    // Give each LED a distinct, non-zero LFSR seed so the random modes do not
+    // run in lockstep across the strip.
+    const uint32_t seed = (kLfsrSeed ^ (static_cast<uint32_t>(i) * 179u)) & 0xFFFFu;
+    _leds[i].lfsr = (seed != 0) ? seed : kLfsrSeed;
     _frame[i] = kColorOff;
   }
 
@@ -260,13 +318,15 @@ Status StatusLed::begin(const Config& config) {
     return setLast(Status(Err::OUT_OF_MEMORY, 0, "backend alloc failed"));
   }
 
-  const Status st = _backend->begin(_config);
+  const Status st = _backend->begin(config);
   if (!st.ok()) {
     destroyBackend(_backend);
     _backend = nullptr;
     return setLast(st);
   }
 
+  // Adopt the configuration only once the backend accepted it.
+  _config = config;
   _initialized = true;
   _frameDirty = true;
   return setLast(Ok());
@@ -281,6 +341,10 @@ void StatusLed::end() {
   _initialized = false;
   _timeSynced = false;
 }
+
+// ---------------------------------------------------------------------------
+// Configuration of a single LED
+// ---------------------------------------------------------------------------
 
 ModeParams StatusLed::getModeDefaults(Mode mode) {
   ModeParams params;
@@ -297,6 +361,10 @@ ModeParams StatusLed::getModeDefaults(Mode mode) {
       params.periodMs = 100;
       params.onMs = 50;
       break;
+    case Mode::Beacon:
+      params.periodMs = 4000;
+      params.onMs = 80;
+      break;
     case Mode::FadeIn:
       params.riseMs = 1000;
       break;
@@ -305,26 +373,16 @@ ModeParams StatusLed::getModeDefaults(Mode mode) {
       break;
     case Mode::PulseSoft:
       params.periodMs = 2000;
-      params.minLevel = 0;
-      params.maxLevel = 255;
       break;
     case Mode::PulseSharp:
       params.periodMs = 800;
-      params.minLevel = 0;
-      params.maxLevel = 255;
       break;
     case Mode::Breathing:
       params.periodMs = 3000;
       params.minLevel = 20;
-      params.maxLevel = 255;
       break;
     case Mode::Throb:
       params.periodMs = 4000;
-      params.minLevel = 0;
-      params.maxLevel = 255;
-      break;
-    case Mode::SOS:
-      params.periodMs = 4200;
       break;
     default:
       break;
@@ -346,6 +404,8 @@ Status StatusLed::setMode(uint8_t index, Mode mode, const ModeParams& params) {
   if (!isValidMode(mode)) {
     return setLast(Status(Err::INVALID_CONFIG, static_cast<int32_t>(mode), "Unknown mode"));
   }
+
+  cancelTemporary(_leds[index]);
   _leds[index].currentPreset = StatusPreset::Off;
   return setLast(setModeInternal(index, mode, params));
 }
@@ -357,9 +417,10 @@ Status StatusLed::setColor(uint8_t index, const RgbColor& color) {
   if (!indexValid(index)) {
     return setLast(Status(Err::INVALID_CONFIG, index, "index out of range"));
   }
+
+  cancelTemporary(_leds[index]);
   _leds[index].currentPreset = StatusPreset::Off;
-  const Status st = setColorInternal(index, color, false);
-  return setLast(st);
+  return setLast(setColorInternal(index, color, false));
 }
 
 Status StatusLed::setSecondaryColor(uint8_t index, const RgbColor& color) {
@@ -369,9 +430,10 @@ Status StatusLed::setSecondaryColor(uint8_t index, const RgbColor& color) {
   if (!indexValid(index)) {
     return setLast(Status(Err::INVALID_CONFIG, index, "index out of range"));
   }
+
+  cancelTemporary(_leds[index]);
   _leds[index].currentPreset = StatusPreset::Off;
-  const Status st = setColorInternal(index, color, true);
-  return setLast(st);
+  return setLast(setColorInternal(index, color, true));
 }
 
 Status StatusLed::setPreset(uint8_t index, StatusPreset preset) {
@@ -382,11 +444,8 @@ Status StatusLed::setPreset(uint8_t index, StatusPreset preset) {
     return setLast(Status(Err::INVALID_CONFIG, index, "index out of range"));
   }
 
-  _leds[index].tempActive = false;
-  _leds[index].tempPending = false;
-
-  const Status st = applyPresetInternal(index, preset);
-  return setLast(st);
+  cancelTemporary(_leds[index]);
+  return setLast(applyPresetInternal(index, preset));
 }
 
 Status StatusLed::setDefaultPreset(uint8_t index, StatusPreset preset) {
@@ -400,13 +459,16 @@ Status StatusLed::setDefaultPreset(uint8_t index, StatusPreset preset) {
     return setLast(Status(Err::INVALID_CONFIG, static_cast<int32_t>(preset), "Unknown preset"));
   }
 
-  _leds[index].defaultPreset = preset;
+  LedState& led = _leds[index];
+  led.defaultPreset = preset;
 
-  if (_leds[index].currentPreset == StatusPreset::Off && _leds[index].mode == Mode::Off) {
-    const Status st = applyPresetInternal(index, preset);
-    return setLast(st);
+  // Only adopt it right away when the LED is genuinely idle: a running mode or
+  // a temporary preset must not be overridden by a default.
+  const bool idle = (led.currentPreset == StatusPreset::Off) && (led.mode == Mode::Off) &&
+                    !led.tempActive && !led.tempPending;
+  if (idle) {
+    return setLast(applyPresetInternal(index, preset));
   }
-
   return setLast(Ok());
 }
 
@@ -417,11 +479,9 @@ Status StatusLed::setTemporaryPreset(uint8_t index, StatusPreset preset, uint32_
   if (!indexValid(index)) {
     return setLast(Status(Err::INVALID_CONFIG, index, "index out of range"));
   }
-  if (durationMs == 0) {
-    return setLast(Status(Err::INVALID_CONFIG, 0, "durationMs must be > 0"));
-  }
-  if (durationMs > kMaxDurationMs) {
-    return setLast(Status(Err::INVALID_CONFIG, 0, "durationMs too large"));
+  if (durationMs == 0 || durationMs > kMaxDurationMs) {
+    return setLast(Status(Err::INVALID_CONFIG, static_cast<int32_t>(durationMs & 0x7FFFFFFFu),
+                          "durationMs out of range"));
   }
   if (findPreset(preset) == nullptr) {
     return setLast(Status(Err::INVALID_CONFIG, static_cast<int32_t>(preset), "Unknown preset"));
@@ -431,7 +491,6 @@ Status StatusLed::setTemporaryPreset(uint8_t index, StatusPreset preset, uint32_
   led.tempPreset = preset;
   led.tempDurationMs = durationMs;
   led.tempPending = true;
-
   return setLast(Ok());
 }
 
@@ -469,12 +528,13 @@ Status StatusLed::clear() {
   const uint8_t count = safeLedCount(_config.ledCount);
   for (uint8_t i = 0; i < count; ++i) {
     LedState& led = _leds[i];
-    led.tempActive = false;
-    led.tempPending = false;
+    cancelTemporary(led);
     led.currentPreset = StatusPreset::Off;
     led.defaultPreset = StatusPreset::Off;
     led.color = kColorOff;
     led.altColor = kColorOff;
+    led.brightness = 255;
+    led.intensity = 0;
     setModeInternal(i, Mode::Off, ModeParams{});
     refreshLedOutput(i);
   }
@@ -490,32 +550,16 @@ Status StatusLed::clearTemporary(uint8_t index) {
   }
 
   LedState& led = _leds[index];
-
-  if (led.tempPending) {
-    led.tempPending = false;
-    return setLast(Ok());
+  led.tempPending = false;
+  if (led.tempActive) {
+    restoreFromTemporary(led, _lastTickMs);
   }
-
-  if (!led.tempActive) {
-    return setLast(Ok());
-  }
-
-  led.tempActive = false;
-  led.mode = led.resumeMode;
-  led.params = led.resumeParams;
-  led.color = led.resumeColor;
-  led.altColor = led.resumeAltColor;
-  led.brightness = led.resumeBrightness;
-  led.currentPreset = led.resumePreset;
-  led.phase = 0;
-  led.useAlt = false;
-  led.modeStartMs = _lastTickMs;
-  led.nextUpdateMs = _lastTickMs;
-  led.updateScheduled = true;
-  led.phaseEndMs = _lastTickMs;
-  refreshLedOutput(index);
   return setLast(Ok());
 }
+
+// ---------------------------------------------------------------------------
+// Bulk configuration
+// ---------------------------------------------------------------------------
 
 Status StatusLed::setAllPreset(StatusPreset preset) {
   if (!_initialized) {
@@ -527,8 +571,7 @@ Status StatusLed::setAllPreset(StatusPreset preset) {
 
   const uint8_t count = safeLedCount(_config.ledCount);
   for (uint8_t i = 0; i < count; ++i) {
-    _leds[i].tempActive = false;
-    _leds[i].tempPending = false;
+    cancelTemporary(_leds[i]);
     applyPresetInternal(i, preset);
   }
   return setLast(Ok());
@@ -548,6 +591,7 @@ Status StatusLed::setAllMode(Mode mode, const ModeParams& params) {
 
   const uint8_t count = safeLedCount(_config.ledCount);
   for (uint8_t i = 0; i < count; ++i) {
+    cancelTemporary(_leds[i]);
     _leds[i].currentPreset = StatusPreset::Off;
     setModeInternal(i, mode, params);
   }
@@ -561,6 +605,7 @@ Status StatusLed::setAllColor(const RgbColor& color) {
 
   const uint8_t count = safeLedCount(_config.ledCount);
   for (uint8_t i = 0; i < count; ++i) {
+    cancelTemporary(_leds[i]);
     _leds[i].currentPreset = StatusPreset::Off;
     setColorInternal(i, color, false);
   }
@@ -593,27 +638,49 @@ Status StatusLed::getLedSnapshot(uint8_t index, LedSnapshot* out) const {
   out->brightness = led.brightness;
   out->intensity = led.intensity;
   out->tempActive = led.tempActive;
-  if (led.tempActive && timeReached(_lastTickMs, led.tempUntilMs)) {
-    out->tempRemainingMs = 0;
-  } else if (led.tempActive) {
-    out->tempRemainingMs = led.tempUntilMs - _lastTickMs;
-  } else {
-    out->tempRemainingMs = 0;
-  }
+  out->tempPending = led.tempPending;
+  out->tempRemainingMs =
+      (led.tempActive && !timeReached(_lastTickMs, led.tempUntilMs)) ? (led.tempUntilMs - _lastTickMs) : 0;
 
   return Ok();
+}
+
+// ---------------------------------------------------------------------------
+// Internal state transitions
+// ---------------------------------------------------------------------------
+
+void StatusLed::cancelTemporary(LedState& led) {
+  led.tempActive = false;
+  led.tempPending = false;
+}
+
+void StatusLed::startMode(LedState& led, uint32_t startMs) {
+  led.phase = 0;
+  led.useAlt = false;
+  led.modeStartMs = startMs;
+  led.nextUpdateMs = startMs;
+  led.updateScheduled = true;
+}
+
+void StatusLed::restoreFromTemporary(LedState& led, uint32_t now_ms) {
+  led.tempActive = false;
+  led.mode = led.resumeMode;
+  led.params = led.resumeParams;
+  led.color = led.resumeColor;
+  led.altColor = led.resumeAltColor;
+  led.currentPreset = led.resumePreset;
+  // Rewind the start of the interrupted animation by the time it had already
+  // run, so one-shot modes (FadeIn/FadeOut) resume finished instead of
+  // replaying, and continuous modes keep their phase.
+  startMode(led, now_ms - led.resumeElapsedMs);
+  led.nextUpdateMs = now_ms;
 }
 
 Status StatusLed::setModeInternal(uint8_t index, Mode mode, const ModeParams& params) {
   LedState& led = _leds[index];
   led.mode = mode;
   led.params = sanitizeParams(mode, params);
-  led.phase = 0;
-  led.useAlt = false;
-  led.modeStartMs = _lastTickMs;
-  led.nextUpdateMs = _lastTickMs;
-  led.updateScheduled = true;
-  led.phaseEndMs = _lastTickMs;
+  startMode(led, _lastTickMs);
   return Ok();
 }
 
@@ -638,19 +705,19 @@ Status StatusLed::applyPresetInternal(uint8_t index, StatusPreset preset) {
   led.currentPreset = preset;
   led.color = def->primary;
   led.altColor = def->secondary;
-  led.useAlt = false;
-  const ModeParams defaults = getModeDefaults(def->mode);
-  setModeInternal(index, def->mode, defaults);
-
-  if (def->useSecondary) {
-    led.altColor = def->secondary;
-  }
+  setModeInternal(index, def->mode, getModeDefaults(def->mode));
   refreshLedOutput(index);
   return Ok();
 }
 
+// ---------------------------------------------------------------------------
+// Rendering
+// ---------------------------------------------------------------------------
+
 void StatusLed::refreshLedOutput(uint8_t index) {
-  if (index >= kMaxLeds || index >= _config.ledCount) return;
+  if (index >= kMaxLeds || index >= _config.ledCount) {
+    return;
+  }
   const LedState& led = _leds[index];
   refreshLedOutput(index, led.intensity, led.useAlt);
 }
@@ -662,13 +729,9 @@ void StatusLed::refreshLedOutput(uint8_t index, uint8_t intensity, bool useAlt) 
   const LedState& led = _leds[index];
   const RgbColor base = useAlt ? led.altColor : led.color;
 
-  const uint8_t scaled1 = scale8(intensity, led.brightness);
-  const uint8_t scaled2 = scale8(scaled1, _config.globalBrightness);
-
-  const RgbColor out(
-      scale8(base.r, scaled2),
-      scale8(base.g, scaled2),
-      scale8(base.b, scaled2));
+  // intensity (mode) * per-LED brightness * global brightness, then per channel.
+  const uint8_t level = scale8(scale8(intensity, led.brightness), _config.globalBrightness);
+  const RgbColor out(scale8(base.r, level), scale8(base.g, level), scale8(base.b, level));
 
   if (_frame[index] != out) {
     _frame[index] = out;
@@ -679,47 +742,41 @@ void StatusLed::refreshLedOutput(uint8_t index, uint8_t intensity, bool useAlt) 
 void StatusLed::updateLed(uint8_t index, uint32_t now_ms) {
   LedState& led = _leds[index];
 
+  // 1. Activate a queued temporary preset, snapshotting what it covers.
   if (led.tempPending) {
     if (!led.tempActive) {
       led.resumeMode = led.mode;
       led.resumeParams = led.params;
       led.resumeColor = led.color;
       led.resumeAltColor = led.altColor;
-      led.resumeBrightness = led.brightness;
       led.resumePreset = led.currentPreset;
+      led.resumeElapsedMs = now_ms - led.modeStartMs;
     }
-    const Status applySt = applyPresetInternal(index, led.tempPreset);
-    if (!applySt.ok()) {
-      led.tempPending = false;
-      _lastStatus = applySt;
-      return;
-    }
+    // The preset was validated by setTemporaryPreset(), so this cannot fail.
+    applyPresetInternal(index, led.tempPreset);
     led.tempActive = true;
     led.tempPending = false;
     led.tempUntilMs = now_ms + led.tempDurationMs;
   }
 
+  // 2. Expire an active temporary preset.
   if (led.tempActive && timeReached(now_ms, led.tempUntilMs)) {
-    led.tempActive = false;
-    led.mode = led.resumeMode;
-    led.params = led.resumeParams;
-    led.color = led.resumeColor;
-    led.altColor = led.resumeAltColor;
-    led.brightness = led.resumeBrightness;
-    led.currentPreset = led.resumePreset;
-    led.phase = 0;
-    led.useAlt = false;
-    led.modeStartMs = now_ms;
-    led.nextUpdateMs = now_ms;
-    led.updateScheduled = true;
-    led.phaseEndMs = now_ms;
-    refreshLedOutput(index);
+    restoreFromTemporary(led, now_ms);
   }
 
-  if (!led.updateScheduled) {
+  // 3. Advance the animation, but only when a deadline is due.
+  if (!led.updateScheduled || !timeReached(now_ms, led.nextUpdateMs)) {
     return;
   }
-  if (!timeReached(now_ms, led.nextUpdateMs)) {
+
+  const Pattern pattern = patternFor(led.mode);
+  if (pattern.steps != nullptr) {
+    const PatternStep& step = pattern.steps[led.phase];
+    led.intensity = step.intensity;
+    led.useAlt = step.useAlt;
+    led.phase = static_cast<uint8_t>((led.phase + 1u) % pattern.count);
+    led.nextUpdateMs = nextDeadline(led.nextUpdateMs, now_ms, step.durationMs);
+    refreshLedOutput(index, led.intensity, led.useAlt);
     return;
   }
 
@@ -729,161 +786,101 @@ void StatusLed::updateLed(uint8_t index, uint32_t now_ms) {
       led.useAlt = false;
       led.updateScheduled = false;
       break;
+
     case Mode::Solid:
       led.intensity = 255;
       led.useAlt = false;
       led.updateScheduled = false;
       break;
+
     case Mode::Dim:
       led.intensity = kDimLevel;
       led.useAlt = false;
       led.updateScheduled = false;
       break;
+
     case Mode::BlinkSlow:
-    case Mode::BlinkFast: {
-      const uint16_t onMs = led.params.onMs;
-      const uint16_t periodMs = led.params.periodMs;
-      const uint16_t offMs = (periodMs > onMs) ? static_cast<uint16_t>(periodMs - onMs) : 0;
-      if (led.phase == 0) {
-        led.phase = 1;
-        led.intensity = 255;
-        led.useAlt = false;
-        led.phaseEndMs = now_ms + onMs;
-      } else {
-        led.phase = 0;
-        led.intensity = 0;
-        led.useAlt = false;
-        led.phaseEndMs = now_ms + offMs;
-      }
-      led.nextUpdateMs = led.phaseEndMs;
-      led.updateScheduled = true;
-    } break;
-    case Mode::DoubleBlink: {
-      const PatternStep& step = kPatternDoubleBlink[led.phase % (sizeof(kPatternDoubleBlink) / sizeof(kPatternDoubleBlink[0]))];
-      led.intensity = step.intensity;
-      led.useAlt = step.useAlt;
-      led.phase = static_cast<uint8_t>(led.phase + 1);
-      led.nextUpdateMs = now_ms + step.durationMs;
-      led.updateScheduled = true;
-    } break;
-    case Mode::TripleBlink: {
-      const PatternStep& step = kPatternTripleBlink[led.phase % (sizeof(kPatternTripleBlink) / sizeof(kPatternTripleBlink[0]))];
-      led.intensity = step.intensity;
-      led.useAlt = step.useAlt;
-      led.phase = static_cast<uint8_t>(led.phase + 1);
-      led.nextUpdateMs = now_ms + step.durationMs;
-      led.updateScheduled = true;
-    } break;
+    case Mode::BlinkFast:
+    case Mode::Strobe:
     case Mode::Beacon: {
-      const PatternStep& step = kPatternBeacon[led.phase % (sizeof(kPatternBeacon) / sizeof(kPatternBeacon[0]))];
-      led.intensity = step.intensity;
-      led.useAlt = step.useAlt;
-      led.phase = static_cast<uint8_t>(led.phase + 1);
-      led.nextUpdateMs = now_ms + step.durationMs;
-      led.updateScheduled = true;
-    } break;
-    case Mode::Strobe: {
-      const PatternStep& step = kPatternStrobe[led.phase % (sizeof(kPatternStrobe) / sizeof(kPatternStrobe[0]))];
-      led.intensity = step.intensity;
-      led.useAlt = step.useAlt;
-      led.phase = static_cast<uint8_t>(led.phase + 1);
-      led.nextUpdateMs = now_ms + step.durationMs;
-      led.updateScheduled = true;
-    } break;
-    case Mode::Heartbeat: {
-      const PatternStep& step = kPatternHeartbeat[led.phase % (sizeof(kPatternHeartbeat) / sizeof(kPatternHeartbeat[0]))];
-      led.intensity = step.intensity;
-      led.useAlt = step.useAlt;
-      led.phase = static_cast<uint8_t>(led.phase + 1);
-      led.nextUpdateMs = now_ms + step.durationMs;
-      led.updateScheduled = true;
-    } break;
-    case Mode::Alternate: {
-      const PatternStep& step = kPatternPolice[led.phase % (sizeof(kPatternPolice) / sizeof(kPatternPolice[0]))];
-      led.intensity = step.intensity;
-      led.useAlt = step.useAlt;
-      led.phase = static_cast<uint8_t>(led.phase + 1);
-      led.nextUpdateMs = now_ms + step.durationMs;
-      led.updateScheduled = true;
-    } break;
-    case Mode::SOS: {
-      const PatternStep& step = kPatternSOS[led.phase % (sizeof(kPatternSOS) / sizeof(kPatternSOS[0]))];
-      led.intensity = step.intensity;
-      led.useAlt = step.useAlt;
-      led.phase = static_cast<uint8_t>(led.phase + 1);
-      led.nextUpdateMs = now_ms + step.durationMs;
-      led.updateScheduled = true;
-    } break;
-    case Mode::FadeIn: {
-      const uint32_t elapsed = now_ms - led.modeStartMs;
-      if (elapsed >= led.params.riseMs) {
-        led.intensity = 255;
-        led.useAlt = false;
+      // sanitizeParams() guarantees onMs <= periodMs.
+      const uint16_t onMs = led.params.onMs;
+      const uint16_t offMs = static_cast<uint16_t>(led.params.periodMs - onMs);
+      led.useAlt = false;
+      if (onMs == 0 || offMs == 0) {
+        // Degenerate duty cycle: hold a static level rather than toggling
+        // through zero-length phases, which would retransmit every period.
+        led.intensity = (onMs == 0) ? 0 : 255;
         led.updateScheduled = false;
-      } else {
-        led.intensity = lerpU8(0, 255, static_cast<uint16_t>(elapsed), led.params.riseMs);
-        led.useAlt = false;
-        led.nextUpdateMs = now_ms + _config.smoothStepMs;
-        led.updateScheduled = true;
+        break;
       }
+      const bool turnOn = (led.phase == 0);
+      led.intensity = turnOn ? 255 : 0;
+      led.phase = turnOn ? 1 : 0;
+      led.nextUpdateMs = nextDeadline(led.nextUpdateMs, now_ms, turnOn ? onMs : offMs);
     } break;
+
+    case Mode::FadeIn:
     case Mode::FadeOut: {
+      const bool rising = (led.mode == Mode::FadeIn);
+      const uint16_t span = rising ? led.params.riseMs : led.params.fallMs;
+      const uint8_t from = rising ? led.params.minLevel : led.params.maxLevel;
+      const uint8_t to = rising ? led.params.maxLevel : led.params.minLevel;
       const uint32_t elapsed = now_ms - led.modeStartMs;
-      if (elapsed >= led.params.fallMs) {
-        led.intensity = 0;
-        led.useAlt = false;
+      led.useAlt = false;
+      if (elapsed >= span) {
+        // One-shot: settle on the end level and stop scheduling work.
+        led.intensity = to;
         led.updateScheduled = false;
       } else {
-        led.intensity = lerpU8(255, 0, static_cast<uint16_t>(elapsed), led.params.fallMs);
-        led.useAlt = false;
+        led.intensity = lerpU8(from, to, static_cast<uint16_t>(elapsed), span);
         led.nextUpdateMs = now_ms + _config.smoothStepMs;
-        led.updateScheduled = true;
       }
     } break;
+
     case Mode::PulseSoft:
     case Mode::PulseSharp:
     case Mode::Breathing:
     case Mode::Throb: {
-      const uint16_t period = (led.params.periodMs > 0) ? led.params.periodMs : 1;
-      const uint16_t phase = static_cast<uint16_t>(now_ms % period);
-      const uint16_t half = period / 2;
-      uint8_t raw = 0;
-      if (phase < half) {
-        raw = lerpU8(led.params.minLevel, led.params.maxLevel, phase, half);
-      } else {
-        raw = lerpU8(led.params.maxLevel, led.params.minLevel, static_cast<uint16_t>(phase - half), half);
-      }
-      uint8_t shaped = raw;
-      if (led.mode == Mode::PulseSoft || led.mode == Mode::Breathing || led.mode == Mode::Throb) {
-        shaped = ease8InOut(raw);
+      // Triangle position over the cycle, shaped, then mapped onto the
+      // configured min..max window so those bounds are the real output limits.
+      const uint16_t period = led.params.periodMs;  // >= kMinPeriodMs
+      const uint16_t half = static_cast<uint16_t>(period / 2);
+      const uint16_t phase = static_cast<uint16_t>((now_ms - led.modeStartMs) % period);
+      const uint8_t pos =
+          (phase < half)
+              ? lerpU8(0, 255, phase, half)
+              : lerpU8(255, 0, static_cast<uint16_t>(phase - half), static_cast<uint16_t>(period - half));
+
+      uint8_t shaped = pos;
+      if (led.mode != Mode::PulseSharp) {
+        shaped = ease8InOut(pos);
         if (led.mode == Mode::Breathing) {
           shaped = scale8(shaped, shaped);
         }
       }
-      led.intensity = shaped;
+      led.intensity = lerpU8(led.params.minLevel, led.params.maxLevel, shaped, 255);
       led.useAlt = false;
       led.nextUpdateMs = now_ms + _config.smoothStepMs;
-      led.updateScheduled = true;
     } break;
+
     case Mode::FlickerCandle:
     case Mode::Glitch: {
-      if (led.lfsr == 0) led.lfsr = 0xACE1u;
-      led.lfsr = (led.lfsr >> 1) ^ (-(static_cast<int32_t>(led.lfsr & 1u)) & 0xB400u);
-      const uint8_t rand8 = static_cast<uint8_t>(led.lfsr & 0xFFu);
-      if (led.mode == Mode::FlickerCandle) {
-        const uint8_t base = 140;
-        const uint8_t span = 100;
-        led.intensity = static_cast<uint8_t>(base + (rand8 % span));
-      } else {
-        led.intensity = (rand8 < 30) ? 0 : 255;
+      if (led.lfsr == 0) {
+        led.lfsr = kLfsrSeed;
       }
+      led.lfsr = (led.lfsr >> 1) ^ (-(static_cast<int32_t>(led.lfsr & 1u)) & kLfsrTaps);
+      const uint8_t rand8 = static_cast<uint8_t>(led.lfsr & 0xFFu);
+      led.intensity = (led.mode == Mode::FlickerCandle)
+                          ? static_cast<uint8_t>(kFlickerBase + (rand8 % kFlickerSpan))
+                          : ((rand8 < kGlitchOffThreshold) ? 0 : 255);
       led.useAlt = false;
-      const uint16_t jitter = static_cast<uint16_t>(30 + (rand8 % 60));
-      led.nextUpdateMs = now_ms + jitter;
-      led.updateScheduled = true;
+      led.nextUpdateMs = now_ms + kRandomMinStepMs + (rand8 % kRandomStepSpanMs);
     } break;
+
     default:
       led.intensity = 0;
+      led.useAlt = false;
       led.updateScheduled = false;
       break;
   }
@@ -896,30 +893,31 @@ void StatusLed::tick(uint32_t now_ms) {
     return;
   }
 
+  const uint8_t count = safeLedCount(_config.ledCount);
+
   if (!_timeSynced) {
-    const uint8_t count = safeLedCount(_config.ledCount);
+    // First tick after begin(): adopt the caller's clock rather than assuming
+    // it starts near zero.
     for (uint8_t i = 0; i < count; ++i) {
       _leds[i].modeStartMs = now_ms;
       _leds[i].nextUpdateMs = now_ms;
-      _leds[i].phaseEndMs = now_ms;
     }
     _timeSynced = true;
   }
 
   _lastTickMs = now_ms;
 
-  const uint8_t count = safeLedCount(_config.ledCount);
   for (uint8_t i = 0; i < count; ++i) {
     updateLed(i, now_ms);
   }
 
-  if (_frameDirty && _backend && _backend->canShow()) {
+  if (_frameDirty && _backend != nullptr && _backend->canShow()) {
     const Status st = _backend->show(_frame, count, _config.colorOrder);
     if (st.ok()) {
       _frameDirty = false;
-    } else if (st.code == Err::RESOURCE_BUSY) {
-      // Keep dirty and try again next tick
-    } else {
+    } else if (st.code != Err::RESOURCE_BUSY) {
+      // Busy is normal back-pressure: keep the frame dirty and retry next
+      // tick. Anything else is reported through lastStatus().
       _lastStatus = st;
     }
   }

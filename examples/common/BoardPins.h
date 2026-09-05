@@ -20,8 +20,8 @@ namespace pins {
 // passing explicit values to Config structs in your application.
 // ====================================================================
 
-/// @brief WS2812 data pin. Example default for ESP32-S3 (GPIO48).
-/// @note ESP32-S2 commonly uses GPIO18 for onboard LED. Override for your board.
+/// @brief WS2812 data pin. Example default for the reference boards (GPIO21).
+/// @note ESP32-S3-DevKitC-1 onboard LED is GPIO48, ESP32-S2-Saola-1 is GPIO18. Override for your board.
 static constexpr int LED_DATA = 21;
 
 /// @brief Default LED count for examples.

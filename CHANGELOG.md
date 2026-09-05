@@ -7,27 +7,127 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- Doxygen configuration for generated API documentation.
-- README instructions for local API documentation generation.
-- `Status::Ok()`, `Status::Error(...)`, free `Error(...)`, and
-  `Status::inProgress()` helpers.
-- `config()` and `lastStatus()` aliases for shorter public accessors.
-- CLI `version` and `info` diagnostics for build metadata, backend, config,
-  and last status.
-- ESP-IDF component metadata and a native `examples/espidf_basic` app using the
-  IDF5 RMT backend.
-- Native ESP-IDF example contract checker that rejects Arduino compatibility
-  facades and enforces the fixed-buffer `app_main` CLI surface.
-- ESP-IDF port implementation notes.
+## [1.4.0] - 2026-09-04
+
+Correctness release from a full audit of the engine, both RMT backends and the
+documentation. Remaining operational limitations are documented in README.
+
+### Fixed
+
+- **WS2812 latch gap.** The IDF5 RMT backend emitted no reset symbol at all, so
+  two frames sent close together were concatenated by the LEDs: pixel data
+  shifted down the chain instead of latching. It now uses a composite encoder
+  (bytes + copy) that appends a 300 us reset, matching the ESP-IDF `led_strip`
+  encoder. The legacy RMT backend's gap was 80 us, which meets the original
+  WS2812B datasheet but not the >280 us required by WS2812B-V5 / WS2812B-2020 /
+  WS2812C parts; it is now 300 us as well.
+- **RMT channel over-allocation on ESP32-S3.** The IDF5 backend requested
+  `mem_block_symbols = 64`, but an S3 channel owns 48 words, so the driver
+  rounded up to two blocks and silently consumed a second TX channel. It now
+  uses `SOC_RMT_MEM_WORDS_PER_CHANNEL`.
+- **Data line left floating after `end()`.** `rmt_del_channel()` calls
+  `gpio_reset_pin()`, which leaves the pad an input with a pull-up, and the
+  legacy driver's `rmt_driver_uninstall()` leaves the pad routed to a dead RMT
+  signal. Both backends now detach the signal and hold the data line low.
+- **Pattern corruption once every 256 steps.** The per-LED phase counter was a
+  `uint8_t` incremented without bound and reduced modulo the table length. For
+  tables whose length does not divide 256 the sequence jumped at the wrap, so
+  SOS restarted mid-message roughly every 48 s and TripleBlink dropped its rest
+  gap every 45 s.
+- **`clearTemporary()` ignored an active temporary preset** when a second one
+  was queued behind it, leaving the LED stuck on the overlay.
+- **Temporary presets replayed finished one-shot fades.** Reverting restored the
+  mode but not its progress, so a completed `FadeOut` jumped back to full
+  brightness and faded out again after every temporary blip.
+- **Degenerate blink duty cycles blipped and retransmitted.** `onMs == periodMs`
+  or `onMs == 0` produced a zero-length phase every period, emitting two frames
+  per period for what should be a static LED.
+- **`minLevel`/`maxLevel` were not the output bounds** for the eased modes:
+  shaping was applied after interpolation, so `Breathing` swung the full 0..255
+  regardless of its documented `minLevel = 20` floor.
+- **Pulse modes were phase-locked to absolute time**, so a pulse started
+  mid-cycle and every LED with the same period moved in lockstep. They now run
+  from the moment the mode was set.
+- **Repeating modes drifted** by one tick interval per step; deadlines now
+  advance from the previous deadline, with a resync after a long stall.
+- **`begin()` adopted a rejected configuration.** A backend failure left
+  `config()` and `ledCount()` reporting settings that were never accepted.
+- **`clear()` left stale state**: per-LED brightness and the last computed
+  intensity survived it, and `getLedSnapshot()` reported them until the next
+  tick.
+- `getModeDefaults(SOS)` advertised a 4200 ms cycle; the pattern is 3400 ms.
+- The Arduino CLI accepted trailing garbage in numeric arguments (`12abc`) and
+  truncated an out-of-range LED index (`status 256` acted on LED 0).
+- The legacy backend left the data pin routed to the RMT peripheral when
+  `rmt_config()` succeeded but `rmt_driver_install()` failed, because the pin was
+  only recorded after installation. `end()` now releases it on that path too.
+- The NeoPixelBus backend failed with a confusing error deep inside the
+  dependency when selected on Arduino core 3.x. It now rejects that combination
+  itself with an `#error`, placed inside its own backend block so no other build
+  is affected. NeoPixelBus reaches the LEDs through the legacy RMT driver, which
+  Arduino core 3.x does not provide and ESP-IDF 6.0 removed entirely.
 
 ### Changed
-- README now explicitly calls out the `status-led` PlatformIO package name.
-- PlatformIO metadata now declares ESP-IDF framework compatibility.
-- IDF5 RMT backend transmit state now uses backend-owned payload storage and an
-  atomic callback handoff instead of a stack payload and volatile busy flag.
-- `examples/espidf_basic` now uses native ESP-IDF console glue instead of
-  including the Arduino-shaped CLI through a compatibility facade.
+
+- **Temporary presets now have one consistent cancellation rule.** `setMode()`,
+  `setColor()`, `setSecondaryColor()`, `setAllMode()` and `setAllColor()` cancel
+  a temporary preset the way `setPreset()` always did, instead of being silently
+  reverted when it expired. Per-LED brightness is no longer part of the
+  saved state, so `setBrightness()` during an overlay is no longer undone.
+- **`setDefaultPreset()` no longer overrides a running temporary preset.** It
+  applies immediately only when the LED is genuinely idle, and is otherwise
+  stored and reported through `LedSnapshot::defaultPreset`.
+- `Strobe` and `Beacon` are duty-cycle modes driven by `ModeParams`, sharing the
+  blink implementation instead of fixed step tables. Their default timings are
+  unchanged (100/50 ms and 4000/80 ms).
+- `FadeIn`/`FadeOut` interpolate between `minLevel` and `maxLevel` rather than
+  a hardcoded 0..255.
+- The seven near-identical pattern blocks in `updateLed()` collapsed into one
+  table-driven step, so a scheduling fix cannot be applied to some modes only.
+- The two RMT backends share `writePixelBytes()` for wire byte order, replacing
+  a `mapColorOrder()` helper whose argument meaning differed between them. The
+  NeoPixelBus backend still converts through its own pixel type, since it never
+  handles raw wire bytes.
+- ESP-IDF component requirement relaxed from `>=6.0.1` to `>=5.3`, the first
+  release with the `esp_driver_rmt` component. The RMT TX API used here is
+  unchanged through 6.x.
+- `LedSnapshot` gained `tempPending`, so a queued temporary preset is visible
+  before it activates.
+- Public Doxygen now states, per method, which state it cancels and which
+  `ModeParams` fields each mode reads. `ColorOrder` now states its scope: 24-bit
+  WS2812-class parts only, with no support for RGBW or BRG variants.
+- Reverting a temporary preset, whether by expiry or `clearTemporary()`, now
+  updates the LEDs on the next `tick()` instead of writing the frame
+  synchronously. The visible result is the same, one tick later.
+- The falling half of a pulse cycle is now scaled by its own length rather than
+  by the rising half's. Only odd `periodMs` values were affected, where the ramp
+  previously ran slightly short.
+- `setTemporaryPreset()` reports an out-of-range duration as one status,
+  `"durationMs out of range"`, instead of two separate messages, and puts the
+  offending value in `Status::detail`. The NeoPixelBus backend likewise reports
+  a bad pixel count as a single `"count out of range"`. Callers that matched on
+  the old message strings need updating; the `Err` codes are unchanged.
+- The ESP-IDF example CLI renamed four keywords to match the Arduino CLI:
+  `flickercandle` to `flicker`, `alarmpolice` to `police`, `hazardamber` to
+  `hazard`, and `lowbattery` to `lowbat`. The old words no longer parse.
+- The RMT v2 backend waits up to 50 ms rather than 10 ms for the queue to drain
+  in `end()`, so a slow transfer completes instead of being abandoned.
+
+### Added
+
+- 15 regression tests, 43 host tests in total. They cover the engine fixes above.
+  The backend, CLI and configuration-rejection fixes are not reachable from the
+  host build and were verified by compilation and review instead.
+
+### Removed
+
+- `docs/IDF_PORT.md` and `docs/IDF_PORT_IMPLEMENTATION.md`: port work logs whose
+  durable content is in README, and whose "current state" sections had gone
+  stale.
+- `scripts/check_idf_example_contract.py`: a static text-matching guard on the
+  ESP-IDF example that was not run by CI and duplicated review.
+- An unused `frameDurationUs()` helper and its bit-period constant, added during
+  the audit and never called.
 
 ## [1.3.0] - 2026-03-01
 
@@ -144,4 +244,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [1.0.1]: https://github.com/janhavelka/StatusLED/releases/tag/v1.0.1
 [1.0.0]: https://github.com/janhavelka/StatusLED/releases/tag/v1.0.0
 
-[Unreleased]: https://github.com/janhavelka/StatusLED/compare/v1.3.0...HEAD
+[1.4.0]: https://github.com/janhavelka/StatusLED/compare/v1.3.0...v1.4.0
+[Unreleased]: https://github.com/janhavelka/StatusLED/compare/v1.4.0...HEAD

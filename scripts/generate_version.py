@@ -24,9 +24,10 @@ def get_git_info(project_root):
         )
         commit = result.stdout.strip() if result.returncode == 0 else "unknown"
         
-        # Check if working tree is dirty
+        # Check if working tree is dirty. The generated Version.h is excluded,
+        # otherwise every build after the first would report "dirty".
         result = subprocess.run(
-            ["git", "diff", "--quiet"],
+            ["git", "diff", "--quiet", "--", ".", ":!include/StatusLed/Version.h"],
             cwd=project_root,
             timeout=2
         )

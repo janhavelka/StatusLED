@@ -7,9 +7,10 @@ Thank you for considering contributing to this project!
 1. Fork the repository
 2. Create a feature branch: `git checkout -b feature/my-feature`
 3. Make your changes
-4. Ensure examples build: `pio run -e ex_cli_s3 -e ex_cli_s2`
-5. Commit with a clear message: `git commit -m "feat: add X"`
-6. Push and open a Pull Request
+4. Run the host tests: `pio test -e native`
+5. Ensure the firmware examples build: `pio run -e cli_esp32s3_idf5 -e cli_esp32s3_idf`
+6. Commit with a clear message: `git commit -m "feat: add X"`
+7. Push and open a Pull Request
 
 ## Guidelines
 
