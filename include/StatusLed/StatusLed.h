@@ -15,6 +15,14 @@
 #include "StatusLed/Config.h"
 #include "StatusLed/Status.h"
 
+#ifndef STATUSLED_MAX_LED_COUNT
+/// @brief Build-wide LED capacity (1..255); must match in every translation unit.
+#define STATUSLED_MAX_LED_COUNT 10
+#endif
+
+static_assert(STATUSLED_MAX_LED_COUNT >= 1 && STATUSLED_MAX_LED_COUNT <= 255,
+              "STATUSLED_MAX_LED_COUNT must be 1..255");
+
 namespace StatusLed {
 
 struct BackendBase;
@@ -192,8 +200,11 @@ struct LedSnapshot {
  */
 class StatusLed {
  public:
-  /// @brief Maximum number of LEDs supported by the library.
-  static constexpr uint8_t kMaxLedCount = 10;
+  /// @brief Maximum number of LEDs supported by this build (default 10).
+  /// @note Set STATUSLED_MAX_LED_COUNT to 1..255 as a build-wide compiler flag.
+  ///       It changes class layout and fixed buffer sizes; every translation
+  ///       unit, including the library, must use the same value.
+  static constexpr uint8_t kMaxLedCount = STATUSLED_MAX_LED_COUNT;
 
   /// @brief Default constructor.
   StatusLed() = default;
@@ -217,8 +228,10 @@ class StatusLed {
    *         backend's own error (typically HARDWARE_FAULT, with the driver
    *         code in Status::detail).
    *
-   * @note Calls end() first, then allocates backend resources. The running
-   *       configuration is replaced only when initialization succeeds.
+   * @note Validates first, then calls end(), clears output-error history and
+   *       allocates backend resources. Invalid engine configuration preserves
+   *       the running instance and its history. The configuration is replaced
+   *       only when initialization succeeds.
    */
   Status begin(const Config& config);
 
@@ -238,8 +251,11 @@ class StatusLed {
    * pixel value changed. Wraparound of now_ms is handled.
    *
    * @param now_ms Current time in milliseconds (typically from millis()).
-   * @note Transmit failures are recorded in getLastStatus(); a busy backend is
-   *       retried on the next call.
+   *       Calls must be less than 0x80000000 ms apart for deadline comparisons.
+   * @note Non-busy transmit failures update getLastStatus(), outputErrorCount()
+   *       and lastOutputStatus(), and defer output polling/retry for 100 ms.
+   *       Animations continue and pending frames coalesce during that interval.
+   *       RESOURCE_BUSY is retried on the next call and is not an output error.
    */
   void tick(uint32_t now_ms);
 
@@ -320,6 +336,8 @@ class StatusLed {
    *       the running animation's progress).
    * @note Calling it again while one is active replaces the overlay and
    *       restarts the timer, keeping the original snapshot underneath.
+   * @note The interrupted animation pauses during the overlay: its elapsed
+   *       progress, pattern phase and remaining step time resume on expiry.
    * @note Cancelled by setMode(), setColor(), setSecondaryColor(),
    *       setPreset(), the setAll*() calls, clearTemporary() and clear().
    *       setBrightness() is independent and survives the revert.
@@ -399,8 +417,9 @@ class StatusLed {
   Status setAllColor(const RgbColor& color);
 
   /**
-   * @brief Force output retransmission on next tick().
+   * @brief Request output retransmission on the next eligible tick().
    * @note Useful after suspected data line noise or external interference.
+   *       Backend readiness and the 100 ms failure retry interval still apply.
    */
   void forceRefresh();
 
@@ -433,15 +452,28 @@ class StatusLed {
   const Config& config() const { return getConfig(); }
 
   /// @brief Get the status recorded by the last fallible public operation.
-  /// @note Also updated by tick() when the backend rejects a frame, so it can
-  ///       be polled for output health. Overwritten by the next public call,
-  ///       including a successful one.
+  /// @note Also updated by tick() on non-busy transmit failures. Subsequent
+  ///       setters overwrite it, including successful ones; use outputErrorCount()
+  ///       and lastOutputStatus() for persistent output health. Const getters
+  ///       do not change it.
   /// @return Last recorded status.
   Status getLastStatus() const { return _lastStatus; }
 
   /// @brief Alias for getLastStatus().
   /// @return Last status from a fallible public operation.
   Status lastStatus() const { return getLastStatus(); }
+
+  /// @brief Count backend-rejected frames, excluding RESOURCE_BUSY.
+  /// @return Failure count, saturating at UINT32_MAX instead of wrapping.
+  /// @note Cleared when begin() passes engine validation and starts initializing;
+  ///       retained across successful calls, successful output and end().
+  uint32_t outputErrorCount() const { return _outputErrors; }
+
+  /// @brief Get the most recent non-busy transmission failure.
+  /// @return Last failed output status, or Ok if none has been recorded.
+  /// @note Cleared alongside outputErrorCount() by begin(); successful output
+  ///       and public calls do not erase it. The raw driver error is in detail.
+  Status lastOutputStatus() const { return _lastOutputStatus; }
 
   /// @brief Get number of LEDs configured.
   /// @return Configured LED count, or the last accepted count after end().
@@ -485,6 +517,11 @@ class StatusLed {
     RgbColor resumeAltColor{};
     StatusPreset resumePreset = StatusPreset::Off;
     uint32_t resumeElapsedMs = 0;
+    uint32_t resumeStepRemainingMs = 0;
+    uint8_t resumeIntensity = 0;
+    uint8_t resumePhase = 0;
+    bool resumeUseAlt = false;
+    bool resumeUpdateScheduled = false;
   };
 
   Status setModeInternal(uint8_t index, Mode mode, const ModeParams& params);
@@ -492,7 +529,7 @@ class StatusLed {
   Status applyPresetInternal(uint8_t index, StatusPreset preset);
   static void cancelTemporary(LedState& led);
   static void startMode(LedState& led, uint32_t startMs);
-  void restoreFromTemporary(LedState& led, uint32_t now_ms);
+  void restoreFromTemporary(uint8_t index, uint32_t now_ms);
   void updateLed(uint8_t index, uint32_t now_ms);
   void refreshLedOutput(uint8_t index, uint8_t intensity, bool useAlt);
   void refreshLedOutput(uint8_t index);
@@ -506,6 +543,10 @@ class StatusLed {
   Config _config{};
   bool _initialized = false;
   Status _lastStatus{};
+  Status _lastOutputStatus{};
+  uint32_t _outputErrors = 0;
+  uint32_t _outputRetryAtMs = 0;
+  bool _outputRetryPending = false;
   uint32_t _lastTickMs = 0;
   bool _timeSynced = false;
   bool _frameDirty = false;

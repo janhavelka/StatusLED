@@ -38,7 +38,7 @@ struct Config {
   int dataPin = -1;
 
   /// @brief Number of LEDs on the bus.
-  /// @note Valid range: 1..10. Validated in begin().
+  /// @note Valid range: 1..StatusLed::kMaxLedCount (default 10). Validated in begin().
   uint8_t ledCount = 0;
 
   /// @brief Color order of LEDs on the bus.
@@ -56,6 +56,14 @@ struct Config {
   /// @brief Minimum step period for smooth animations in milliseconds.
   /// @note Valid range: 5..1000. Lower values increase CPU usage.
   uint16_t smoothStepMs = 20;
+
+  /// @brief Reserve RMT memory for the whole frame, reset and stop marker.
+  /// @note Opt-in for both RMT backends; ignored by NeoPixelBus and Null.
+  ///       Avoids timing-critical refill interrupts during flash writes but
+  ///       consumes adjacent RMT memory blocks. false retains one-block streaming.
+  /// @note begin() returns INVALID_CONFIG if the frame cannot fit the chip's
+  ///       RMT memory, or the legacy rmtChannel leaves too few blocks after it.
+  bool rmtFullFrameBuffer = false;
 };
 
 }  // namespace StatusLed

@@ -18,6 +18,10 @@ extern "C" {
 #include "driver/gpio.h"
 #include "driver/rmt_encoder.h"
 #include "driver/rmt_tx.h"
+#include "esp_attr.h"
+#include "esp_heap_caps.h"
+#include "esp_rom_gpio.h"
+#include "soc/gpio_sig_map.h"
 #include "soc/soc_caps.h"
 }
 
@@ -29,18 +33,8 @@ namespace {
 constexpr uint32_t kRmtResolutionHz = 40000000;
 constexpr uint32_t kTicksPerUs = kRmtResolutionHz / 1000000u;
 
-constexpr uint16_t kT0H = 16;  // 0.40 us
-constexpr uint16_t kT0L = 34;  // 0.85 us
-constexpr uint16_t kT1H = 32;  // 0.80 us
-constexpr uint16_t kT1L = 18;  // 0.45 us
-
-// The channel's memory block must be a whole number of hardware blocks, and
-// asking for more silently steals a neighbouring TX channel. 48 words on
-// ESP32-S3, 64 on ESP32-S2.
-constexpr size_t kMemBlockSymbols = SOC_RMT_MEM_WORDS_PER_CHANNEL;
-
-// Wait budget for draining the queue in end(). A full 10-LED frame is well
-// under 1 ms, so this only matters if the driver is wedged.
+// Wait budget for draining the queue in end(). Even a 255-LED frame is under
+// 9 ms, so this only matters if the driver is wedged.
 constexpr int kCleanupWaitMs = 50;
 
 constexpr uint8_t kMaxLeds = ::StatusLed::StatusLed::kMaxLedCount;
@@ -73,7 +67,7 @@ struct Ws2812Encoder {
   int state;
 };
 
-size_t encodeFrame(rmt_encoder_t* encoder, rmt_channel_handle_t channel, const void* primaryData,
+size_t IRAM_ATTR encodeFrame(rmt_encoder_t* encoder, rmt_channel_handle_t channel, const void* primaryData,
                    size_t dataSize, rmt_encode_state_t* retState) {
   Ws2812Encoder* self = reinterpret_cast<Ws2812Encoder*>(encoder);
   rmt_encode_state_t session = RMT_ENCODING_RESET;
@@ -106,7 +100,7 @@ size_t encodeFrame(rmt_encoder_t* encoder, rmt_channel_handle_t channel, const v
   return encoded;
 }
 
-esp_err_t resetFrameEncoder(rmt_encoder_t* encoder) {
+esp_err_t IRAM_ATTR resetFrameEncoder(rmt_encoder_t* encoder) {
   Ws2812Encoder* self = reinterpret_cast<Ws2812Encoder*>(encoder);
   rmt_encoder_reset(self->bytes);
   rmt_encoder_reset(self->copy);
@@ -140,13 +134,13 @@ esp_err_t createFrameEncoder(rmt_encoder_handle_t* out) {
   enc->state = 0;
 
   rmt_bytes_encoder_config_t bytesCfg{};
-  bytesCfg.bit0.duration0 = kT0H;
+  bytesCfg.bit0.duration0 = kRmtT0H;
   bytesCfg.bit0.level0 = 1;
-  bytesCfg.bit0.duration1 = kT0L;
+  bytesCfg.bit0.duration1 = kRmtT0L;
   bytesCfg.bit0.level1 = 0;
-  bytesCfg.bit1.duration0 = kT1H;
+  bytesCfg.bit1.duration0 = kRmtT1H;
   bytesCfg.bit1.level0 = 1;
-  bytesCfg.bit1.duration1 = kT1L;
+  bytesCfg.bit1.duration1 = kRmtT1L;
   bytesCfg.bit1.level1 = 0;
   bytesCfg.flags.msb_first = true;
 
@@ -178,6 +172,8 @@ esp_err_t createFrameEncoder(rmt_encoder_handle_t* out) {
 
 class BackendIdf5Ws2812 final : public BackendBase {
  public:
+  ~BackendIdf5Ws2812() override { end(); }
+
   Status begin(const Config& config) override {
     end();
 
@@ -196,10 +192,21 @@ class BackendIdf5Ws2812 final : public BackendBase {
     // RMT v2 allocates channels itself; Config::rmtChannel does not apply.
     (void)config.rmtChannel;
 
+    // Full-frame buffering removes the refill deadline while flash cache is
+    // disabled. It is opt-in because each additional block consumes another
+    // channel's memory. The driver reserves those blocks, including RX blocks.
+    const uint16_t blocks = config.rmtFullFrameBuffer
+                                ? rmtMemoryBlocksForFrame(config.ledCount,
+                                                          SOC_RMT_MEM_WORDS_PER_CHANNEL)
+                                : 1;
+    if (blocks > SOC_RMT_CHANNELS_PER_GROUP) {
+      return Status(Err::INVALID_CONFIG, blocks, "not enough RMT memory blocks");
+    }
+
     rmt_tx_channel_config_t txCfg{};
     txCfg.clk_src = RMT_CLK_SRC_DEFAULT;
     txCfg.gpio_num = gpio;
-    txCfg.mem_block_symbols = kMemBlockSymbols;
+    txCfg.mem_block_symbols = static_cast<size_t>(blocks) * SOC_RMT_MEM_WORDS_PER_CHANNEL;
     txCfg.resolution_hz = kRmtResolutionHz;
     txCfg.trans_queue_depth = 1;
     txCfg.flags.invert_out = false;
@@ -208,6 +215,12 @@ class BackendIdf5Ws2812 final : public BackendBase {
     esp_err_t err = rmt_new_tx_channel(&txCfg, &_tx_chan);
     if (err != ESP_OK) {
       _tx_chan = nullptr;
+      if (err == ESP_ERR_NOT_FOUND) {
+        return Status(Err::RESOURCE_BUSY, err, "no free RMT memory/channel");
+      }
+      if (err == ESP_ERR_NO_MEM) {
+        return Status(Err::OUT_OF_MEMORY, err, "RMT allocation failed");
+      }
       return Status(Err::HARDWARE_FAULT, err, "rmt_new_tx_channel failed");
     }
 
@@ -305,13 +318,13 @@ class BackendIdf5Ws2812 final : public BackendBase {
     rmt_transmit_config_t txConfig{};
     txConfig.loop_count = 0;
     txConfig.flags.eot_level = 0;  // hold the data line low between frames
+    txConfig.flags.queue_nonblocking = true;
     return rmt_transmit(_tx_chan, _encoder, _payload, payloadSize, &txConfig);
   }
 
   /// @brief Tear down driver objects and leave the data line driven low.
-  /// @note rmt_del_channel() calls gpio_reset_pin(), which leaves the pad as an
-  ///       input with the pull-up enabled. A floating-high WS2812 data line can
-  ///       latch noise, so drive it low afterwards.
+  /// @note Driver GPIO cleanup differs across IDF releases; explicitly detach
+  ///       RMT before driving low so later channel reuse cannot drive this pad.
   void releaseDriver(gpio_num_t gpio) {
     if (_tx_chan != nullptr) {
       (void)rmt_disable(_tx_chan);
@@ -324,6 +337,7 @@ class BackendIdf5Ws2812 final : public BackendBase {
       (void)rmt_del_channel(_tx_chan);
       _tx_chan = nullptr;
       if (gpio != GPIO_NUM_NC) {
+        esp_rom_gpio_connect_out_signal(gpio, SIG_GPIO_OUT_IDX, false, false);
         (void)gpio_set_direction(gpio, GPIO_MODE_OUTPUT);
         (void)gpio_set_level(gpio, 0);
       }
@@ -331,7 +345,7 @@ class BackendIdf5Ws2812 final : public BackendBase {
   }
 
   /// @brief Transmit-done callback. Runs in ISR context: only clears the flag.
-  static bool onTxDone(rmt_channel_handle_t channel, const rmt_tx_done_event_data_t* data,
+  static bool IRAM_ATTR onTxDone(rmt_channel_handle_t channel, const rmt_tx_done_event_data_t* data,
                        void* userCtx) {
     (void)channel;
     (void)data;
@@ -348,17 +362,27 @@ class BackendIdf5Ws2812 final : public BackendBase {
   bool _installed = false;
   uint8_t _count = 0;
   uint8_t _payload[kMaxPayloadBytes] = {};
+  // Only acquire-load/release-store are used: Xtensa emits byte accesses and
+  // memory barriers on S2/S3. ATOMIC_BOOL_LOCK_FREE also covers RMW operations
+  // and is only 1 on S2, so it cannot validate this narrower ISR requirement.
   std::atomic<bool> _txBusy{false};
 };
 
 }  // namespace
 
 BackendBase* createBackend() {
-  return new (std::nothrow) BackendIdf5Ws2812();
+  // malloc/new's size threshold only prefers internal RAM; low internal memory
+  // can otherwise put even this small object (payload + ISR context) in PSRAM.
+  void* storage = heap_caps_malloc(sizeof(BackendIdf5Ws2812), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  return storage == nullptr ? nullptr : new (storage) BackendIdf5Ws2812();
 }
 
 void destroyBackend(BackendBase* backend) {
-  delete backend;
+  if (backend != nullptr) {
+    auto* self = static_cast<BackendIdf5Ws2812*>(backend);
+    self->~BackendIdf5Ws2812();
+    heap_caps_free(self);
+  }
 }
 
 }  // namespace StatusLed

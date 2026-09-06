@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Persistent `outputErrorCount()` and `lastOutputStatus()` diagnostics. The
+  counter saturates, excludes `RESOURCE_BUSY`, and survives successful calls
+  and output until a new validated initialization attempt.
+- Build-wide `STATUSLED_MAX_LED_COUNT` override (1..255, default 10), with
+  compile-time bounds checks and a native test configuration at maximum capacity.
+- Optional `Config::rmtFullFrameBuffer` for both RMT backends: reserves data,
+  reset and stop-marker memory before output to avoid flash-write refill glitches.
+  Invalid sizes/channels and unavailable resources return errors.
+- CI builds Arduino RMT v2 on S2/S3 and the native ESP-IDF component on 5.3/6.0,
+  including cache-safe S3 configurations; feature branches run the same checks.
+
+### Fixed
+
+- Non-busy output failures defer polling/retry for 100 ms using wraparound-safe
+  deadlines. Animation updates continue and coalesce while output recovers.
+- Both RMT backends allocate once in internal RAM, preserving multiple instances
+  without PSRAM fallback. IDF5 encoder and completion callbacks live in IRAM for
+  cache-safe SDK builds, and transmit submissions explicitly avoid queue waits.
+- RMT zero bits now use 325 ns high and 925 ns low at 40 MHz, preserving a
+  1.25 us bit period and meeting the newer zero-high window. One-bit timings
+  remain unchanged; compatibility still requires qualification of the LED revision.
+- Legacy failed-initialization cleanup releases the GPIO even when driver
+  installation fails. IDF5 shutdown explicitly detaches the GPIO matrix on
+  ESP-IDF 6.x as well as 5.x. Shutdown submits the blank frame asynchronously and waits
+  within a fixed budget. Legacy resource checks reject overlapping active blocks.
+- Pulse modes normalize their clock origin each cycle, retaining phase after
+  more than 49.7 days of continuous operation.
+- Temporary overlays preserve blink/pattern phase and remaining step time, as
+  well as fade/pulse progress; completed fades remain complete across clock wrap.
+  Rejected preset values no longer cancel an active temporary preset.
+- Both CLIs share strict unsigned decimal parsing, including GPIO arguments;
+  signed/overflowing/trailing input and invalid color-order names are rejected.
+  Both expose full-frame buffering in `begin` and persistent output health in `info`.
+  CLI initialization/configuration mirrors the actual library state after a
+  rejected reinitialization, preserving a still-running instance.
+- NeoPixelBus 2.7.6 dependencies use the exact upstream Git commit because the
+  previous registry specification no longer resolves on a clean installation.
+
+### Documentation
+
+- Reverified every original audit finding, corrected its PSRAM, timing arithmetic,
+  package-switching and resolved-cleanup claims, and recorded the decisions and
+  validation limits in `docs/CODE_AUDIT_REVIEW.md`.
+- Documented RMT memory costs, cache-safe SDK settings, output retry/health
+  semantics, capacity ABI requirements and remaining timing limitations.
+
 ## [1.4.0] - 2026-09-04
 
 Correctness release from a full audit of the engine, both RMT backends and the

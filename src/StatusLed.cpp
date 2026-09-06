@@ -23,6 +23,7 @@ constexpr uint16_t kMinSmoothStepMs = 5;
 constexpr uint16_t kMaxSmoothStepMs = 1000;
 constexpr uint16_t kMinPeriodMs = 2;
 constexpr uint32_t kMaxDurationMs = 0x7FFFFFFFu;
+constexpr uint32_t kOutputRetryMs = 100;
 constexpr int kMaxDataPin = 255;
 constexpr uint8_t kMaxRmtChannel = 3;
 
@@ -303,6 +304,10 @@ Status StatusLed::begin(const Config& config) {
   _lastTickMs = 0;
   _timeSynced = false;
   _frameDirty = false;
+  _lastOutputStatus = Ok();
+  _outputErrors = 0;
+  _outputRetryAtMs = 0;
+  _outputRetryPending = false;
 
   for (uint8_t i = 0; i < kMaxLeds; ++i) {
     _leds[i] = LedState();
@@ -443,6 +448,9 @@ Status StatusLed::setPreset(uint8_t index, StatusPreset preset) {
   if (!indexValid(index)) {
     return setLast(Status(Err::INVALID_CONFIG, index, "index out of range"));
   }
+  if (findPreset(preset) == nullptr) {
+    return setLast(Status(Err::INVALID_CONFIG, static_cast<int32_t>(preset), "Unknown preset"));
+  }
 
   cancelTemporary(_leds[index]);
   return setLast(applyPresetInternal(index, preset));
@@ -552,7 +560,7 @@ Status StatusLed::clearTemporary(uint8_t index) {
   LedState& led = _leds[index];
   led.tempPending = false;
   if (led.tempActive) {
-    restoreFromTemporary(led, _lastTickMs);
+    restoreFromTemporary(index, _lastTickMs);
   }
   return setLast(Ok());
 }
@@ -662,18 +670,23 @@ void StatusLed::startMode(LedState& led, uint32_t startMs) {
   led.updateScheduled = true;
 }
 
-void StatusLed::restoreFromTemporary(LedState& led, uint32_t now_ms) {
+void StatusLed::restoreFromTemporary(uint8_t index, uint32_t now_ms) {
+  LedState& led = _leds[index];
   led.tempActive = false;
   led.mode = led.resumeMode;
   led.params = led.resumeParams;
   led.color = led.resumeColor;
   led.altColor = led.resumeAltColor;
   led.currentPreset = led.resumePreset;
-  // Rewind the start of the interrupted animation by the time it had already
-  // run, so one-shot modes (FadeIn/FadeOut) resume finished instead of
-  // replaying, and continuous modes keep their phase.
-  startMode(led, now_ms - led.resumeElapsedMs);
-  led.nextUpdateMs = now_ms;
+  // Pause the original clock across the overlay, including the remaining
+  // duration of a blink/pattern step and a one-shot's completed state.
+  led.modeStartMs = now_ms - led.resumeElapsedMs;
+  led.nextUpdateMs = now_ms + led.resumeStepRemainingMs;
+  led.intensity = led.resumeIntensity;
+  led.phase = led.resumePhase;
+  led.useAlt = led.resumeUseAlt;
+  led.updateScheduled = led.resumeUpdateScheduled;
+  refreshLedOutput(index);
 }
 
 Status StatusLed::setModeInternal(uint8_t index, Mode mode, const ModeParams& params) {
@@ -751,6 +764,13 @@ void StatusLed::updateLed(uint8_t index, uint32_t now_ms) {
       led.resumeAltColor = led.altColor;
       led.resumePreset = led.currentPreset;
       led.resumeElapsedMs = now_ms - led.modeStartMs;
+      led.resumeStepRemainingMs = timeReached(now_ms, led.nextUpdateMs)
+                                     ? 0
+                                     : led.nextUpdateMs - now_ms;
+      led.resumeIntensity = led.intensity;
+      led.resumePhase = led.phase;
+      led.resumeUseAlt = led.useAlt;
+      led.resumeUpdateScheduled = led.updateScheduled;
     }
     // The preset was validated by setTemporaryPreset(), so this cannot fail.
     applyPresetInternal(index, led.tempPreset);
@@ -761,7 +781,7 @@ void StatusLed::updateLed(uint8_t index, uint32_t now_ms) {
 
   // 2. Expire an active temporary preset.
   if (led.tempActive && timeReached(now_ms, led.tempUntilMs)) {
-    restoreFromTemporary(led, now_ms);
+    restoreFromTemporary(index, now_ms);
   }
 
   // 3. Advance the animation, but only when a deadline is due.
@@ -847,6 +867,9 @@ void StatusLed::updateLed(uint8_t index, uint32_t now_ms) {
       const uint16_t period = led.params.periodMs;  // >= kMinPeriodMs
       const uint16_t half = static_cast<uint16_t>(period / 2);
       const uint16_t phase = static_cast<uint16_t>((now_ms - led.modeStartMs) % period);
+      // Keep the clock origin in the current cycle so a continuously running
+      // mode does not lose phase after a full 2^32 ms of elapsed time.
+      led.modeStartMs = now_ms - phase;
       const uint8_t pos =
           (phase < half)
               ? lerpU8(0, 255, phase, half)
@@ -911,14 +934,28 @@ void StatusLed::tick(uint32_t now_ms) {
     updateLed(i, now_ms);
   }
 
+  if (_outputRetryPending) {
+    if (!timeReached(now_ms, _outputRetryAtMs)) {
+      return;
+    }
+    _outputRetryPending = false;
+  }
+
   if (_frameDirty && _backend != nullptr && _backend->canShow()) {
     const Status st = _backend->show(_frame, count, _config.colorOrder);
     if (st.ok()) {
       _frameDirty = false;
     } else if (st.code != Err::RESOURCE_BUSY) {
       // Busy is normal back-pressure: keep the frame dirty and retry next
-      // tick. Anything else is reported through lastStatus().
+      // tick. Preserve other failures separately from public-call status and
+      // defer even canShow(), which may itself call the hardware driver.
       _lastStatus = st;
+      _lastOutputStatus = st;
+      if (_outputErrors != UINT32_MAX) {
+        ++_outputErrors;
+      }
+      _outputRetryAtMs = now_ms + kOutputRetryMs;
+      _outputRetryPending = true;
     }
   }
 }

@@ -1,5 +1,10 @@
 # StatusLED Code Audit
 
+> Historical audit of the tree at `a7e0e4e`. The independent recheck, corrections,
+> implemented changes and validation results are in
+> [CODE_AUDIT_REVIEW.md](CODE_AUDIT_REVIEW.md). Findings below describe that
+> earlier tree and are retained for traceability.
+
 Full review of the animation engine, all four output backends, the examples and
 the documentation, checked against the WS2812 family datasheets and the ESP-IDF
 RMT driver sources (legacy 4.4 and RMT v2 5.3 through 6.0).

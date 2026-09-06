@@ -1,7 +1,8 @@
 # StatusLED
 
-Non-blocking status LED engine for ESP32-S2/S3 driving 1..10 WS2812-class
-(NeoPixel) LEDs. The animation core is framework-neutral; the output backend
+Non-blocking status LED engine for ESP32-S2/S3 driving WS2812-class (NeoPixel)
+LEDs: up to 10 by default, configurable to 255. The animation core is
+framework-neutral; the output backend
 (RMT driver) is selected at compile time for Arduino-ESP32 or pure ESP-IDF.
 
 Typical use: a couple of status LEDs inside a larger firmware (connectivity,
@@ -112,10 +113,18 @@ NeoPixelBus environments are also provided (opt-in, Arduino core 2.x only):
 | `Status getLedSnapshot(i, out)`            | Read current LED state                       |
 | `const Config& config()`                   | Configuration accepted by `begin()`          |
 | `Status lastStatus()`                      | Last status of a fallible operation          |
+| `uint32_t outputErrorCount()`               | Persistent count of failed output submissions |
+| `Status lastOutputStatus()`                 | Most recent output failure since initialization |
 
 All setters return `NOT_INITIALIZED` before `begin()` and `INVALID_CONFIG` on a
 bad index, mode, or preset. `tick()` records backend transmit failures in
-`lastStatus()`; poll it if you need driver health.
+`lastStatus()`, which a later successful setter can replace. For output health,
+poll `outputErrorCount()` and `lastOutputStatus()` instead. The counter saturates
+at `UINT32_MAX`; successful calls and frames preserve this history. A valid
+`begin()` attempt clears it when starting a new backend; engine validation errors
+preserve the running instance and its history. `RESOURCE_BUSY` is not an error.
+After a non-busy failure, output polling and retry pause for 100 ms while
+animations continue and pending updates coalesce.
 
 ### Layers: mode, color, preset, temporary, default
 
@@ -125,8 +134,10 @@ bad index, mode, or preset. `tick()` records backend transmit failures in
   current preset. `setMode`/`setColor` afterwards mark the preset as `Off`
   (custom state).
 - **Temporary preset** overlays the LED for a duration. It activates on the next
-  `tick()`, snapshots the state below it (mode, params, colors, preset) and
+  `tick()`, snapshots the state below it (mode, params, colors, preset and animation progress) and
   restores that state when the duration elapses or `clearTemporary()` is called.
+  The underlying animation pauses during the overlay, including blink/pattern
+  phase and the time remaining until its next step; completed fades stay complete.
   Calling `setTemporaryPreset()` again while active just replaces the overlay
   and restarts the timer; the snapshot below is kept. Any explicit state change
   cancels it instead: `setPreset`, `setMode`, `setColor`, `setSecondaryColor`,
@@ -142,13 +153,28 @@ bad index, mode, or preset. `tick()` records backend transmit failures in
 ```cpp
 struct Config {
   int dataPin = -1;                         // WS2812 data GPIO, required
-  uint8_t ledCount = 0;                     // 1..10
+  uint8_t ledCount = 0;                     // 1..kMaxLedCount (default maximum 10)
   ColorOrder colorOrder = ColorOrder::GRB;  // wire byte order: GRB (WS2812) or RGB
   uint8_t rmtChannel = 0;                   // 0..3, legacy IDF and NeoPixelBus only
   uint8_t globalBrightness = 255;           // 0..255
   uint16_t smoothStepMs = 20;               // 5..1000, update period of smooth modes
+  bool rmtFullFrameBuffer = false;          // reserve a complete frame in RMT memory
 };
 ```
+
+Set `STATUSLED_MAX_LED_COUNT` to 1..255 as a **build-wide** compiler flag to
+change capacity; invalid values fail compilation. It sizes the engine and backend
+arrays, so application and library translation units must agree. Do not define it
+in just one source file. For PlatformIO add
+`-DSTATUSLED_MAX_LED_COUNT=12` to `build_flags`. In an ESP-IDF application's
+top-level CMake file, after `project(...)`, use:
+
+```cmake
+idf_component_get_property(statusled_lib StatusLED COMPONENT_LIB)
+target_compile_definitions(${statusled_lib} PUBLIC STATUSLED_MAX_LED_COUNT=12)
+```
+
+Larger capacities cost fixed RAM (about 24 KB for the legacy backend's item buffer alone at 255 LEDs).
 
 ## Error Model
 
@@ -207,7 +233,7 @@ driver family ends up in a binary.
 
 | Macro                             | Driver                                | Where it works                          |
 | --------------------------------- | ------------------------------------- | --------------------------------------- |
-| `STATUSLED_BACKEND_IDF5_WS2812=1` | `driver/rmt_tx.h` (RMT v2)            | Arduino core 3.x, ESP-IDF 5.1+ and 6.x  |
+| `STATUSLED_BACKEND_IDF5_WS2812=1` | `driver/rmt_tx.h` (RMT v2)            | Arduino core 3.x, ESP-IDF 5.3+ and 6.x  |
 | `STATUSLED_BACKEND_IDF_WS2812=1`  | `driver/rmt.h` (legacy)               | Arduino core 2.x (IDF 4.4)              |
 | `STATUSLED_BACKEND_NEOPIXELBUS=1` | NeoPixelBus 2.7.6 (legacy RMT inside) | Arduino core 2.x                        |
 | `STATUSLED_BACKEND_NULL=1`        | none                                  | host tests                              |
@@ -215,11 +241,11 @@ driver family ends up in a binary.
 `Config::rmtChannel` selects the channel for the legacy and NeoPixelBus
 backends. The RMT v2 backend lets the driver allocate a channel and ignores it.
 
-The two RMT backends encode WS2812B timing themselves (T0H 0.40 us, T0L
-0.85 us, T1H 0.80 us, T1L 0.45 us at 40 MHz RMT resolution), append a 300 us
+The two RMT backends share WS2812 timing constants (T0H 0.325 us, T0L
+0.925 us, T1H 0.80 us, T1L 0.45 us at 40 MHz RMT resolution), append a 300 us
 latch gap after every frame, and keep the transmit buffer in backend-owned
 storage until the transfer completes. The NeoPixelBus backend delegates all of
-that to NeoPixelBus, which uses the same bit timings and a 300 us reset.
+that to the pinned NeoPixelBus 2.7.6 implementation, whose waveform is unchanged.
 `show()` returns `RESOURCE_BUSY` while a previous frame is still on
 the wire; the engine keeps the frame dirty and retries on the next `tick()`.
 
@@ -237,24 +263,44 @@ shifts down the chain instead of latching.
   or drop the first LED's supply with a series diode.
 - **Data line at rest.** `end()` blanks the LEDs and leaves the data pin driven
   low, which is the idle state WS2812 parts expect.
-- **Flash writes.** The RMT driver refills its buffer from an interrupt that is
-  not IRAM-resident, so a concurrent NVS or filesystem write can disturb a frame
-  in flight. Schedule LED transmissions away from flash writes when a transient
-  color glitch is unacceptable; reserving enough RMT memory for a complete frame
-  would consume most or all RMT blocks at the 10-LED limit.
+- **Flash writes.** Default one-block streaming can be interrupted when flash
+  operations disable the cache: interrupt allocation flags, not just code
+  placement in IRAM, determine whether refills continue. Set
+  `Config::rmtFullFrameBuffer = true` to keep the entire frame, 300 us reset and
+  stop marker in peripheral memory. This avoids timing-critical refills at the
+  cost of adjacent RMT blocks. Ten LEDs need six 48-word blocks on S3 and all
+  four 64-word blocks on S2. Two LEDs need two blocks on S3 or one on S2.
+  Oversized frames or an unsuitable legacy start channel return `INVALID_CONFIG`;
+  unavailable resources return an error rather than silently falling back.
+  Coordinate legacy RMT resource initialization and shared interrupt policy with
+  other users; do not allocate overlapping channels concurrently. Full-frame mode is ignored by NeoPixelBus
+  and Null. Larger strips can still use default streaming.
+- **Cache-safe ESP-IDF builds.** The IDF5 callbacks/encoder functions reside in
+  IRAM, and both RMT backend objects are allocated once in internal RAM. Enable
+  `CONFIG_RMT_ISR_IRAM_SAFE` on IDF 5.3/5.4 or
+  `CONFIG_RMT_TX_ISR_CACHE_SAFE` on 5.5+ when refills must run during flash writes.
+  These SDK settings require rebuilding ESP-IDF; a compiler flag cannot change
+  the prebuilt Arduino SDK. Internal allocation preserves support for multiple
+  StatusLed instances and does not allocate during normal output.
 
 ### Known limitations
 
-- The current 0-bit high time is 400 ns. It is field-proven on the tested LEDs,
-  but exceeds the 380 ns maximum in newer WorldSemi datasheets. Validate the
-  selected LED revision on hardware before deployment.
-- `lastStatus()` is a last-call result, not a sticky hardware-health record. A
-  later successful API call replaces an earlier transmit failure.
-- The maximum LED count is fixed at 10. A persistently failing installed backend
-  is retried on every `tick()` while the frame remains dirty.
-- Build the Arduino core 2.x and core 3.x environment families separately when
-  using one shared PlatformIO core directory; switching families can cause large
-  framework package copies on Windows.
+- T0H 325 ns addresses the newer 380 ns maximum while retaining a 1.25 us bit
+  period. The unchanged one-bit waveform is not universally compliant with every
+  published WS2812x/SK6812 revision: their low-time windows conflict, and older
+  SK6812 revisions specify a shorter high pulse. Qualify the exact LED revision
+  electrically.
+- `end()` attempts to blank the strip within bounded waits, then releases the
+  driver and drives the pin low. Hardware/driver failure can prevent blanking.
+- Default streaming still requires scheduling away from flash operations when
+  the SDK does not enable cache-safe RMT interrupts. Use full-frame buffering
+  where the peripheral memory budget permits it.
+- Concurrent projects installing different Arduino framework versions can replace
+  a shared framework directory while another build uses it. Serialize those
+  builds/installations or give concurrently active platform families separate
+  short `PLATFORMIO_CORE_DIR` paths. The wrapper still uses the same installed
+  VS Code-managed Core executable. Matching installed versions are resolved by
+  metadata; a sequential environment switch does not inherently copy files.
 
 ## Runtime Model
 
@@ -263,7 +309,8 @@ shifts down the chain instead of latching.
 - **Timing:** `tick()` is bounded (a few microseconds per LED plus one
   non-blocking RMT submit). Blink and pattern steps are scheduled by deadline;
   smooth modes update every `smoothStepMs`. Wraparound of the 32-bit
-  millisecond clock is handled.
+  millisecond clock is handled when successive calls are less than
+  0x80000000 ms apart.
 - **Memory:** the backend object is allocated once in `begin()` and freed in
   `end()`. Zero allocation in `tick()` or any setter.
 - **Retransmit policy:** a frame is sent only when a pixel value changed
@@ -280,6 +327,11 @@ shifts down the chain instead of latching.
 
 Both CLIs accept the same commands and the same mode/preset names. Useful
 diagnostics: `help`, `version`, `info`, `status`, `config`, `last`.
+`info` includes persistent output health. `begin [pin] [count] [grb|rgb] [rmt]
+[smooth_ms] [full_frame]` accepts an optional final 0/1 switch for full-frame RMT
+buffering (default 0). For example, `begin 21 2 grb 0 20 1` enables it on two
+LEDs at GPIO21. Both CLIs reject signed, overflowing or malformed unsigned
+numbers and invalid color-order names before changing configuration.
 
 ```bash
 # Arduino CLI builds
@@ -291,12 +343,24 @@ idf.py set-target esp32s3
 idf.py build flash monitor
 ```
 
-Windows note for the IDF5 envs: if package extraction fails because of long
-paths, enable long paths in Windows or use a short PlatformIO core dir:
+Windows note: use separate short storage directories if concurrent projects
+install different framework versions, or if package extraction hits path limits:
+
+```powershell
+$env:PLATFORMIO_CORE_DIR = "C:\sl-pio2"
+.\scripts\pio.cmd run -e cli_esp32s3_idf
+$env:PLATFORMIO_CORE_DIR = "C:\sl-pio3"
+.\scripts\pio.cmd run -e cli_esp32s3_idf5
+```
+
+These commands use the existing VS Code-managed executable; they do not install
+another PlatformIO Core. The storage directories duplicate packages/toolchains,
+so allow additional disk space. For a single platform family, one short path is
+enough:
 
 ```powershell
 $env:PLATFORMIO_CORE_DIR = "C:\p"
-python -m platformio run -e cli_esp32s3_idf5
+.\scripts\pio.cmd run -e cli_esp32s3_idf5
 ```
 
 ## Tests
@@ -304,7 +368,7 @@ python -m platformio run -e cli_esp32s3_idf5
 Host-based unit tests for timing and state transitions:
 
 ```bash
-pio test -e native
+pio test -e native -e native_max
 ```
 
 Requires a host C++ compiler (GCC/Clang). On Windows, install MinGW-w64 and make

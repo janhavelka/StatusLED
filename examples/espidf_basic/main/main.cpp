@@ -4,11 +4,9 @@
  */
 
 #include <ctype.h>
-#include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -17,6 +15,7 @@
 #include <freertos/task.h>
 
 #include "examples/common/BoardPins.h"
+#include "examples/common/CliParse.h"
 #include "StatusLed/StatusLed.h"
 #include "StatusLed/Version.h"
 
@@ -165,38 +164,6 @@ bool parsePreset(const char* value, StatusLed::StatusPreset* out) {
   return false;
 }
 
-bool parseU32(const char* value, uint32_t* out) {
-  if (value == nullptr || value[0] == '\0' || out == nullptr) {
-    return false;
-  }
-  char* end = nullptr;
-  errno = 0;
-  const unsigned long parsed = strtoul(value, &end, 10);
-  if (errno != 0 || end == value || *end != '\0') {
-    return false;
-  }
-  *out = static_cast<uint32_t>(parsed);
-  return true;
-}
-
-bool parseU8(const char* value, uint8_t* out, uint8_t maxValue) {
-  uint32_t parsed = 0;
-  if (!parseU32(value, &parsed) || parsed > maxValue) {
-    return false;
-  }
-  *out = static_cast<uint8_t>(parsed);
-  return true;
-}
-
-bool parseU16(const char* value, uint16_t* out, uint16_t minValue, uint16_t maxValue) {
-  uint32_t parsed = 0;
-  if (!parseU32(value, &parsed) || parsed < minValue || parsed > maxValue) {
-    return false;
-  }
-  *out = static_cast<uint16_t>(parsed);
-  return true;
-}
-
 int splitArgs(char* line, char* argv[], size_t maxArgs) {
   int argc = 0;
   char* p = line;
@@ -275,7 +242,7 @@ void printHelp() {
   printHelpItem("help", "Show this help");
   printHelpItem("version", "Print build/version metadata");
   printf("\n%s[Lifecycle]%s\n", LOG_COLOR_GREEN, LOG_COLOR_RESET);
-  printHelpItem("begin [pin] [count] [grb|rgb] [rmt] [smooth_ms]", "Initialize driver");
+  printHelpItem("begin [pin] [count] [grb|rgb] [rmt] [smooth_ms] [full_frame]", "Initialize driver");
   printHelpItem("end", "Stop driver");
   printHelpItem("stress on [period_ms]", "Enable mixed stress mode");
   printHelpItem("stress off", "Disable stress mode");
@@ -307,12 +274,13 @@ void printHelp() {
 
 void printConfig() {
   const StatusLed::Config& cfg = g_leds.config();
-  printf("dataPin=%d ledCount=%u order=%s rmt=%u smoothStepMs=%u\n",
+  printf("dataPin=%d ledCount=%u order=%s rmt=%u smoothStepMs=%u fullFrame=%u\n",
          cfg.dataPin,
          static_cast<unsigned>(cfg.ledCount),
          cfg.colorOrder == StatusLed::ColorOrder::GRB ? "GRB" : "RGB",
          static_cast<unsigned>(cfg.rmtChannel),
-         static_cast<unsigned>(cfg.smoothStepMs));
+         static_cast<unsigned>(cfg.smoothStepMs),
+         static_cast<unsigned>(cfg.rmtFullFrameBuffer));
 }
 
 void printInfo() {
@@ -323,6 +291,8 @@ void printInfo() {
   printConfig();
   printf("Last status: ");
   printStatus(g_leds.lastStatus());
+  printf("Output errors: %lu last: ", static_cast<unsigned long>(g_leds.outputErrorCount()));
+  printStatus(g_leds.lastOutputStatus());
 }
 
 void printOneLed(uint8_t index) {
@@ -372,7 +342,8 @@ void beginDefault() {
   g_config.smoothStepMs = 20;
 
   const StatusLed::Status st = g_leds.begin(g_config);
-  g_initialized = st.ok();
+  g_initialized = g_leds.isInitialized();
+  g_config = g_leds.config();
   if (!logStatus(st)) {
     return;
   }
@@ -446,30 +417,48 @@ void handleCommand(char* line) {
     StatusLed::ColorOrder order = StatusLed::ColorOrder::GRB;
     uint8_t rmt = 0;
     uint16_t smooth = 20;
+    uint8_t fullFrame = 0;
     if (argc > 1) {
-      pin = atoi(argv[1]);
+      uint8_t parsedPin = 0;
+      if (!cli::parseU8(argv[1], &parsedPin, UINT8_MAX)) {
+        printf("invalid data pin\n");
+        return;
+      }
+      pin = parsedPin;
     }
-    if (argc > 2 && !parseU8(argv[2], &count, StatusLed::StatusLed::kMaxLedCount)) {
+    if (argc > 2 && !cli::parseU8(argv[2], &count, StatusLed::StatusLed::kMaxLedCount)) {
       printf("invalid LED count\n");
       return;
     }
     if (argc > 3) {
-      order = strcmp(argv[3], "rgb") == 0 ? StatusLed::ColorOrder::RGB : StatusLed::ColorOrder::GRB;
+      if (strcmp(argv[3], "rgb") == 0) {
+        order = StatusLed::ColorOrder::RGB;
+      } else if (strcmp(argv[3], "grb") != 0) {
+        printf("invalid color order\n");
+        return;
+      }
     }
-    if (argc > 4 && !parseU8(argv[4], &rmt, 3)) {
+    if (argc > 4 && !cli::parseU8(argv[4], &rmt, 3)) {
       printf("invalid RMT channel\n");
       return;
     }
-    if (argc > 5 && !parseU16(argv[5], &smooth, 5, 1000)) {
+    if (argc > 5 && !cli::parseU16(argv[5], &smooth, 5, 1000)) {
       printf("invalid smooth_ms\n");
       return;
     }
+    if (argc > 6 && !cli::parseU8(argv[6], &fullFrame, 1)) {
+      printf("invalid full_frame (0 or 1)\n");
+      return;
+    }
+    g_config.rmtFullFrameBuffer = fullFrame != 0;
     g_config.dataPin = pin;
     g_config.ledCount = count;
     g_config.colorOrder = order;
     g_config.rmtChannel = rmt;
     g_config.smoothStepMs = smooth;
-    g_initialized = logStatus(g_leds.begin(g_config));
+    (void)logStatus(g_leds.begin(g_config));
+    g_initialized = g_leds.isInitialized();
+    g_config = g_leds.config();
   } else if (strcmp(argv[0], "end") == 0) {
     g_leds.end();
     g_initialized = false;
@@ -481,7 +470,7 @@ void handleCommand(char* line) {
     }
     if (argc > 1) {
       uint32_t idx = 0;
-      if (parseU32(argv[1], &idx) && idx <= UINT8_MAX) {
+      if (cli::parseU32(argv[1], &idx) && idx <= UINT8_MAX) {
         printOneLed(static_cast<uint8_t>(idx));
       }
     } else {
@@ -492,20 +481,20 @@ void handleCommand(char* line) {
   } else if (strcmp(argv[0], "mode") == 0 && argc >= 3) {
     uint32_t idx = 0;
     StatusLed::Mode mode;
-    if (parseU32(argv[1], &idx) && idx <= UINT8_MAX && parseMode(argv[2], &mode)) {
+    if (cli::parseU32(argv[1], &idx) && idx <= UINT8_MAX && parseMode(argv[2], &mode)) {
       (void)logStatus(g_leds.setMode(static_cast<uint8_t>(idx), mode));
     }
   } else if (strcmp(argv[0], "modep") == 0 && argc >= 9) {
     uint32_t idx = 0;
     StatusLed::Mode mode;
     StatusLed::ModeParams params;
-    if (parseU32(argv[1], &idx) && idx <= UINT8_MAX && parseMode(argv[2], &mode) &&
-        parseU16(argv[3], &params.periodMs, 1, UINT16_MAX) &&
-        parseU16(argv[4], &params.onMs, 0, UINT16_MAX) &&
-        parseU16(argv[5], &params.riseMs, 0, UINT16_MAX) &&
-        parseU16(argv[6], &params.fallMs, 0, UINT16_MAX) &&
-        parseU8(argv[7], &params.minLevel, 255) &&
-        parseU8(argv[8], &params.maxLevel, 255)) {
+    if (cli::parseU32(argv[1], &idx) && idx <= UINT8_MAX && parseMode(argv[2], &mode) &&
+        cli::parseU16(argv[3], &params.periodMs, 1, UINT16_MAX) &&
+        cli::parseU16(argv[4], &params.onMs, 0, UINT16_MAX) &&
+        cli::parseU16(argv[5], &params.riseMs, 0, UINT16_MAX) &&
+        cli::parseU16(argv[6], &params.fallMs, 0, UINT16_MAX) &&
+        cli::parseU8(argv[7], &params.minLevel, 255) &&
+        cli::parseU8(argv[8], &params.maxLevel, 255)) {
       (void)logStatus(g_leds.setMode(static_cast<uint8_t>(idx), mode, params));
     }
   } else if (strcmp(argv[0], "color") == 0 && argc >= 5) {
@@ -513,8 +502,8 @@ void handleCommand(char* line) {
     uint8_t r = 0;
     uint8_t g = 0;
     uint8_t b = 0;
-    if (parseU32(argv[1], &idx) && idx <= UINT8_MAX && parseU8(argv[2], &r, 255) &&
-        parseU8(argv[3], &g, 255) && parseU8(argv[4], &b, 255)) {
+    if (cli::parseU32(argv[1], &idx) && idx <= UINT8_MAX && cli::parseU8(argv[2], &r, 255) &&
+        cli::parseU8(argv[3], &g, 255) && cli::parseU8(argv[4], &b, 255)) {
       (void)logStatus(g_leds.setColor(static_cast<uint8_t>(idx), StatusLed::RgbColor(r, g, b)));
     }
   } else if (strcmp(argv[0], "alt") == 0 && argc >= 5) {
@@ -522,46 +511,46 @@ void handleCommand(char* line) {
     uint8_t r = 0;
     uint8_t g = 0;
     uint8_t b = 0;
-    if (parseU32(argv[1], &idx) && idx <= UINT8_MAX && parseU8(argv[2], &r, 255) &&
-        parseU8(argv[3], &g, 255) && parseU8(argv[4], &b, 255)) {
+    if (cli::parseU32(argv[1], &idx) && idx <= UINT8_MAX && cli::parseU8(argv[2], &r, 255) &&
+        cli::parseU8(argv[3], &g, 255) && cli::parseU8(argv[4], &b, 255)) {
       (void)logStatus(g_leds.setSecondaryColor(static_cast<uint8_t>(idx), StatusLed::RgbColor(r, g, b)));
     }
   } else if (strcmp(argv[0], "preset") == 0 && argc >= 3) {
     uint32_t idx = 0;
     StatusLed::StatusPreset preset;
-    if (parseU32(argv[1], &idx) && idx <= UINT8_MAX && parsePreset(argv[2], &preset)) {
+    if (cli::parseU32(argv[1], &idx) && idx <= UINT8_MAX && parsePreset(argv[2], &preset)) {
       (void)logStatus(g_leds.setPreset(static_cast<uint8_t>(idx), preset));
     }
   } else if (strcmp(argv[0], "default") == 0 && argc >= 3) {
     uint32_t idx = 0;
     StatusLed::StatusPreset preset;
-    if (parseU32(argv[1], &idx) && idx <= UINT8_MAX && parsePreset(argv[2], &preset)) {
+    if (cli::parseU32(argv[1], &idx) && idx <= UINT8_MAX && parsePreset(argv[2], &preset)) {
       (void)logStatus(g_leds.setDefaultPreset(static_cast<uint8_t>(idx), preset));
     }
   } else if (strcmp(argv[0], "temp") == 0 && argc >= 4) {
     uint32_t idx = 0;
     uint32_t duration = 0;
     StatusLed::StatusPreset preset;
-    if (parseU32(argv[1], &idx) && idx <= UINT8_MAX && parsePreset(argv[2], &preset) &&
-        parseU32(argv[3], &duration)) {
+    if (cli::parseU32(argv[1], &idx) && idx <= UINT8_MAX && parsePreset(argv[2], &preset) &&
+        cli::parseU32(argv[3], &duration)) {
       (void)logStatus(g_leds.setTemporaryPreset(static_cast<uint8_t>(idx), preset, duration));
     }
   } else if (strcmp(argv[0], "bright") == 0 && argc >= 3) {
     uint32_t idx = 0;
     uint8_t level = 0;
-    if (parseU32(argv[1], &idx) && idx <= UINT8_MAX && parseU8(argv[2], &level, 255)) {
+    if (cli::parseU32(argv[1], &idx) && idx <= UINT8_MAX && cli::parseU8(argv[2], &level, 255)) {
       (void)logStatus(g_leds.setBrightness(static_cast<uint8_t>(idx), level));
     }
   } else if (strcmp(argv[0], "gbright") == 0 && argc >= 2) {
     uint8_t level = 0;
-    if (parseU8(argv[1], &level, 255)) {
+    if (cli::parseU8(argv[1], &level, 255)) {
       (void)logStatus(g_leds.setGlobalBrightness(level));
     }
   } else if (strcmp(argv[0], "clear") == 0) {
     (void)logStatus(g_leds.clear());
   } else if (strcmp(argv[0], "cleartemp") == 0 && argc >= 2) {
     uint32_t idx = 0;
-    if (parseU32(argv[1], &idx) && idx <= UINT8_MAX) {
+    if (cli::parseU32(argv[1], &idx) && idx <= UINT8_MAX) {
       (void)logStatus(g_leds.clearTemporary(static_cast<uint8_t>(idx)));
     }
   } else if (strcmp(argv[0], "allpreset") == 0 && argc >= 2) {
@@ -578,7 +567,7 @@ void handleCommand(char* line) {
     uint8_t r = 0;
     uint8_t g = 0;
     uint8_t b = 0;
-    if (parseU8(argv[1], &r, 255) && parseU8(argv[2], &g, 255) && parseU8(argv[3], &b, 255)) {
+    if (cli::parseU8(argv[1], &r, 255) && cli::parseU8(argv[2], &g, 255) && cli::parseU8(argv[3], &b, 255)) {
       (void)logStatus(g_leds.setAllColor(StatusLed::RgbColor(r, g, b)));
     }
   } else if (strcmp(argv[0], "refresh") == 0) {
@@ -594,7 +583,7 @@ void handleCommand(char* line) {
       g_stress.nextMs = nowMs();
       g_stress.step = 0;
       if (argc > 2) {
-        (void)parseU16(argv[2], &g_stress.periodMs, 1, UINT16_MAX);
+        (void)cli::parseU16(argv[2], &g_stress.periodMs, 1, UINT16_MAX);
       }
       printf("Stress: %sON%s period=%u ms\n", LOG_COLOR_GREEN, LOG_COLOR_RESET, static_cast<unsigned>(g_stress.periodMs));
     } else if (strcmp(argv[1], "off") == 0) {
