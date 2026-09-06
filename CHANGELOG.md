@@ -49,6 +49,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+- Hardware smoke tests are optional in the engineering guidelines and no longer
+  block commits or pushes; validation reports still state whether they were run.
 - Reverified every original audit finding, corrected its PSRAM, timing arithmetic,
   package-switching and resolved-cleanup claims, and recorded the decisions and
   validation limits in `docs/CODE_AUDIT_REVIEW.md`.

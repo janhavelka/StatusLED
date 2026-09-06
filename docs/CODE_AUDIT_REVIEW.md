@@ -110,7 +110,7 @@ of incorrectly marking a preserved running instance stopped.
 | Documentation/source checks | Doxygen generation, text-integrity and `git diff --check` passed. |
 | Local native ESP-IDF 5.3.1 S3, cache-safe SDK | Passed using the native example sources and repository component through PlatformIO 6.9.0. Generated SDK config confirms `CONFIG_RMT_ISR_IRAM_SAFE=y`; linked library callbacks, SDK byte/copy encoders and TX ISR are in IRAM. |
 | Native ESP-IDF 5.3/6.0, S2/S3 CI | Configured; not yet executed. |
-| Hardware boot/basic LED smoke tests | Not performed; bench identification pending. |
+| Hardware boot/basic LED smoke tests | Not performed; deferred. Hardware testing is optional under the engineering guidelines updated on 2026-09-06 and does not block commits or pushes. |
 | Waveforms, flash-write overlap, GPIO release and representative LED revisions | Not performed. |
 
 The new tests cover fault persistence, retry deadlines/wraparound, busy coalescing,

@@ -168,6 +168,10 @@ Keep it dense: state constraints, units, side effects. Omit the obvious.
 - Tests must be deterministic and not rely on real time
 - Cover edge cases (wraparound, mode transitions, temporary-preset lifecycle)
 - Do not require hardware for unit tests
+- Hardware smoke tests are optional and are not prerequisites for committing or
+  pushing. Record when hardware validation has not been performed.
+- When hardware testing is performed, smoke test `cli_esp32s3_idf5` (and
+  `cli_esp32s3_idf` when the legacy backend changed): boot + basic LED output.
 
 ---
 
@@ -199,7 +203,5 @@ Before committing:
 - [ ] Both CLIs still expose the same commands
 - [ ] CHANGELOG.md updated
 - [ ] `pio test -e native` passes
-- [ ] Smoke test `cli_esp32s3_idf5` (and `cli_esp32s3_idf` when the legacy
-      backend changed) on hardware: boot + basic LED output
 
 **If any item fails, fix before proceeding.**
