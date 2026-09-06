@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Restore ESP-IDF 6.0 builds on S2/S3 after the SDK moved the RMT channel-count
+  capability into its HAL. Full-frame buffer validation keeps the total memory
+  capacity, including borrowable RX blocks on S3, across IDF 5.x and 6.x.
 - Non-busy output failures defer polling/retry for 100 ms using wraparound-safe
   deadlines. Animation updates continue and coalesce while output recovers.
 - Both RMT backends allocate once in internal RAM, preserving multiple instances

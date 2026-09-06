@@ -23,6 +23,9 @@ extern "C" {
 #include "esp_rom_gpio.h"
 #include "soc/gpio_sig_map.h"
 #include "soc/soc_caps.h"
+#ifndef SOC_RMT_CHANNELS_PER_GROUP
+#include "hal/rmt_ll.h"
+#endif
 }
 
 namespace StatusLed {
@@ -39,6 +42,14 @@ constexpr int kCleanupWaitMs = 50;
 
 constexpr uint8_t kMaxLeds = ::StatusLed::StatusLed::kMaxLedCount;
 constexpr size_t kMaxPayloadBytes = static_cast<size_t>(kMaxLeds) * kBytesPerPixel;
+
+// IDF 6 moved the total channel count from SoC caps to the RMT HAL. Count all
+// memory blocks, including RX blocks that the TX driver can reserve on S3.
+#ifdef SOC_RMT_CHANNELS_PER_GROUP
+constexpr uint16_t kRmtMemoryBlocks = SOC_RMT_CHANNELS_PER_GROUP;
+#else
+constexpr uint16_t kRmtMemoryBlocks = RMT_LL_GET(CHANS_PER_INST);
+#endif
 
 bool isValidColorOrder(ColorOrder order) {
   switch (order) {
@@ -199,7 +210,7 @@ class BackendIdf5Ws2812 final : public BackendBase {
                                 ? rmtMemoryBlocksForFrame(config.ledCount,
                                                           SOC_RMT_MEM_WORDS_PER_CHANNEL)
                                 : 1;
-    if (blocks > SOC_RMT_CHANNELS_PER_GROUP) {
+    if (blocks > kRmtMemoryBlocks) {
       return Status(Err::INVALID_CONFIG, blocks, "not enough RMT memory blocks");
     }
 
