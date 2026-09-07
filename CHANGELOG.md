@@ -60,6 +60,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+- Regenerated the tracked version header from the clean merged tree before
+  tagging v1.5.0, so ESP-IDF consumers receive clean release metadata.
 - Scoped the historical audit's findings and baseline verification to `a7e0e4e`,
   with the implementation review providing the current state and a successful
   12-job CI run that executed the follow-up cache-safe SDK assertions.
