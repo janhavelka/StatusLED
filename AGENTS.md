@@ -1,46 +1,53 @@
-# AGENTS.md - Production Status LED Engineering Guidelines
+# AGENTS.md - StatusLED Engineering Guidelines
+
+## Workflow
+
+Before editing, fetch remotes and fast-forward the newest intended working
+branch to its upstream. Stop and report dirty, divergent, or conflicted state;
+never overwrite work to force a sync.
+
+On Windows, use `.\scripts\pio.cmd <arguments>`; it selects the current user's
+VS Code-managed installation. Never install another PlatformIO Core; if the
+wrapper cannot find it, stop and report the missing installation.
 
 ## Role
-You are a professional embedded software engineer building a production-grade status LED subsystem for ESP32.
+
+You are a professional embedded software engineer maintaining a production-grade
+status LED library for ESP32-S2 / ESP32-S3 (WS2812-class LEDs).
 
 **Primary goals:**
 - Robustness and stability
 - Deterministic, predictable behavior
 - Zero boot-loops or stalls in production
 
-**Target:** ESP32-S2 / ESP32-S3, Arduino framework, PlatformIO.
+**Targets:** ESP32-S2 / ESP32-S3 under Arduino-ESP32 (PlatformIO) and pure
+ESP-IDF (component build).
 
 **These rules are binding.**
 
 ---
 
-## Repository Model (Single Library Template)
+## Repository Model
 
-This repository is a SINGLE reusable library template designed to scale across multiple embedded projects:
-
-### Folder Structure (Mandatory)
+This repository is a single reusable library consumed by larger firmware
+projects (via PlatformIO `lib_deps` or as an ESP-IDF component). The
+example CLI exists to exercise the device on a bench.
 
 ```
 include/StatusLed/   - Public API headers ONLY (Doxygen documented)
-  |-- Status.h       - Error types
-  |-- Config.h       - Configuration struct
-  |-- StatusLed.h    - Main library class
-src/                 - Implementation (.cpp files)
-examples/
-  |-- 01_status_led_cli/     - Interactive CLI demo
-  |-- common/                - Example-only helpers (Log.h, BoardPins.h)
-platformio.ini       - Build environments (uses build_src_filter)
-library.json         - PlatformIO metadata
-README.md           - Full documentation
-CHANGELOG.md        - Keep a Changelog format
-AGENTS.md           - This file
+src/                 - Engine (StatusLed.cpp) + one file per output backend
+examples/            - Arduino CLI, native ESP-IDF CLI, shared example helpers
+test/                - Host (native) unit tests
+scripts/             - Version generator, text-integrity check, PlatformIO wrapper
 ```
 
 **Rules:**
 - Public headers go in `include/StatusLed/` - these define the API contract
 - Board-specific values (pins, etc.) NEVER in library code - only in `Config`
-- Examples demonstrate usage - they may use `examples/common/BoardPins.h`
+- Examples may use `examples/common/BoardPins.h` for board defaults
 - Keep structure boring and predictable - no clever layouts
+- Do not add planning notes, prompts, session logs, or audit reports to the
+  repository. Durable facts go into README/CHANGELOG/Doxygen.
 
 ---
 
@@ -54,7 +61,6 @@ AGENTS.md           - This file
 
 ### 2. Non-Blocking by Default
 
-All libraries MUST expose:
 ```cpp
 Status begin(const Config& config);  // Initialize
 void tick(uint32_t now_ms);          // Cooperative update (non-blocking)
@@ -63,28 +69,21 @@ void end();                          // Cleanup
 
 - `tick()` returns immediately after bounded work
 - Long operations split into state machine steps
-- Example: 120-second timeout -> check `now_ms >= deadline_ms` each tick
+- Timeouts: check `now_ms >= deadline_ms` each tick, wraparound-safe
 
 ### 3. Explicit Configuration (No Hidden Globals)
-- Hardware resources (pins, RMT channel, color order) passed via `Config`
+- Hardware resources (pin, RMT channel, color order) passed via `Config`
 - No hardcoded pins or interfaces in library code
-- Libraries are board-agnostic by design
-- Examples may provide board-specific defaults in `examples/common/BoardPins.h`
+- Validate in `begin()`, return `INVALID_CONFIG` on error
+- Document valid ranges in Doxygen
 
-### 4. No Silent NVS / Storage Side Effects
-- Persistent storage is OPTIONAL and DISABLED by default.
-- Storage MUST be explicitly enabled by the user.
-- When enabled:
-  - all storage operations MUST be fallible (return `Status`);
-  - write frequency MUST be controlled;
-  - failures MUST not block or brick the system.
-- Default behavior: zero storage access, zero side effects.
+### 4. No Storage Side Effects
+- The library never touches NVS or any persistent storage.
 
 ### 5. No Repeated Heap Allocations in Steady State
-- Allocate resources in `begin()` if needed
+- The backend object is allocated once in `begin()` and freed in `end()`
 - ZERO allocations in `tick()` and normal operation
-- Use fixed-size buffers and ring buffers
-- If allocation is unavoidable, document it clearly
+- Fixed-size buffers only
 
 ### 6. Boring, Predictable Code
 - Prefer verbose over clever
@@ -97,85 +96,55 @@ void end();                          // Cleanup
 ## LED Subsystem Design Rules
 
 ### Output and Timing
-- WS2812-class single-wire, 800kHz output
+- WS2812-class single-wire, 800 kHz output, GRB or RGB byte order
 - No retransmit when output is static
   - Solid/static modes: no repeated sends
   - Blink: send only on toggles
   - Smooth fades: send only on quantized step changes
 - No delay() or busy-waiting in library code
+- Every frame must be followed by a valid reset/latch gap before the next one
 
 ### CPU and Watchdog Safety
 - Per-tick work is bounded and minimal
-- Only call `show()` when frame is dirty and backend is ready
+- Only call `show()` when the frame is dirty and the backend is ready
 - Coalesce updates if a transmit is in progress
 
 ### Backends and Driver Safety
-- Prefer hardware-driven output (RMT)
-- Pin dependency versions in `platformio.ini` `lib_deps`
-- Avoid mixing legacy and next-gen RMT drivers in the same build
-- Provide a fallback backend if driver conflicts are observed
+- Backend selection is compile-time only: set exactly one
+  `STATUSLED_BACKEND_*` macro to `1` (others `0`)
+- IDF 4.4 (Arduino core 2.x) envs use `STATUSLED_BACKEND_IDF_WS2812`;
+  IDF 5.x/6.x (Arduino core 3.x, pure ESP-IDF) use `STATUSLED_BACKEND_IDF5_WS2812`
+- NeoPixelBus is opt-in per env; pin dependency versions in `platformio.ini`
+- Never mix legacy and next-gen RMT drivers in the same build
 - Never ship a configuration that can boot-loop or abort at runtime
-- IDF 4.4 envs use `STATUSLED_BACKEND_IDF_WS2812`; IDF 5.x envs use `STATUSLED_BACKEND_IDF5_WS2812`
-- NeoPixelBus is opt-in per env
-- Set exactly one `STATUSLED_BACKEND_*` macro to `1` (others `0`)
-- Backend code must not pull conflicting driver APIs into the binary
+
+### Framework Boundary
+- `include/` and `src/StatusLed.cpp` stay framework-neutral
+- Platform-specific code lives only in `src/StatusLedBackend*.cpp`
+- The pure ESP-IDF component compiles only the IDF5 RMT backend
+- ESP-IDF examples use native IDF APIs (`app_main`, `esp_timer`, FreeRTOS,
+  POSIX stdin); no Arduino compatibility facades
+- Keep the Arduino and ESP-IDF CLIs command-compatible (same command and
+  mode/preset names); document any intentional difference in README
 
 ---
 
 ## Error Handling
 
-### Status/Err Type (Mandatory)
-- Library APIs return `Status` struct:
-  ```cpp
-  struct Status {
-    Err code;           // Category (OK, INVALID_CONFIG, TIMEOUT, ...)
-    int32_t detail;     // Vendor/third-party error code
-    const char* msg;    // STATIC STRING ONLY (never heap-allocated)
-  };
-  ```
-- When wrapping third-party libraries, translate errors at boundary
-- Store original error code in `detail` field
-- Silent failure is unacceptable - always return Status
-
-### Error Propagation
+- Library APIs return `Status { Err code; int32_t detail; const char* msg; }`
+- `msg` is a STATIC STRING ONLY (never heap-allocated)
+- Translate third-party errors at the boundary; keep the raw code in `detail`
 - Errors must be checkable: `if (!status.ok()) { /* handle */ }`
 - Log errors in examples, not in library code
 - Document error conditions in Doxygen (`@return INVALID_CONFIG if ...`)
 
 ---
 
-## Configuration Rules
-
-### Config Struct Design
-```cpp
-struct Config {
-  // Hardware
-  int dataPin = -1;         // -1 = disabled/not used
-  uint8_t ledCount = 0;     // 1..10
-  uint8_t rmtChannel = 0;   // ESP32-S2/S3: 0..3
-  ColorOrder colorOrder = ColorOrder::GRB;
-
-  // Behavior
-  uint32_t tickMinStepMs = 20;   // quantized updates for smooth modes
-  uint8_t globalBrightness = 255; // 0..255
-};
-```
-
-**Rules:**
-- All pins default to -1 (disabled)
-- All timeouts in milliseconds (uint32_t)
-- Boolean flags for optional features
-- Validate in `begin()`, return `INVALID_CONFIG` on error
-- Document valid ranges in Doxygen
-
----
-
 ## Logging
 
 - **Library code:** NO logging (not even optional)
-- **Examples:** May use `examples/common/Log.h` macros
+- **Examples:** May use `examples/common/Log.h` (Arduino) or `printf` (ESP-IDF)
 - **Never:** Log from ISRs
-- **Production:** Libraries must work without Serial/logging
 
 ---
 
@@ -183,36 +152,26 @@ struct Config {
 
 All public headers in `include/StatusLed/` require:
 
-**File:** `@file` + `@brief` (one line) + optional detail paragraph
+- **File:** `@file` + `@brief`
+- **Class:** `@brief` + usage notes + threading/ISR constraints
+- **Function:** `@brief` + `@param` + `@return` (what codes mean) + `@note`
+  (side effects, validation, timing)
+- **Config field:** `/// @brief` (purpose, units, valid range)
 
-**Class:** `@brief` (what it does) + usage notes + threading/ISR constraints
-
-**Function:** `@brief` + `@param` (name + meaning) + `@return` (what codes mean) + `@note` (side effects, validation, timing)
-
-**Config field:** `/// @brief` (purpose, units, valid range) + `@note` if pin is application-provided
-
-**Keep it dense:** State what matters (constraints, units, side effects). Omit obvious explanations.
-
----
-
-## README Behavioral Contracts (Required Sections)
-
-When adding/modifying functionality, update README with:
-
-1. **Threading Model:** "Single-threaded by default. No internal tasks."
-2. **Timing:** "tick() completes in <1ms. Long operations split across calls."
-3. **Resource Ownership:** "LED pin and RMT channel passed via Config. No hardcoded resources."
-4. **Memory:** "All allocation in begin(). Zero allocation in tick()."
-5. **Error Handling:** "All errors returned as Status. No silent failures."
+Keep it dense: state constraints, units, side effects. Omit the obvious.
 
 ---
 
 ## Testing Expectations
 
-- Add host/unit tests for timing/state transitions
+- Add host/unit tests (`pio test -e native -e native_max`) for timing/state transitions
 - Tests must be deterministic and not rely on real time
-- Keep test coverage for edge cases (wraparound, mode transitions)
+- Cover edge cases (wraparound, mode transitions, temporary-preset lifecycle)
 - Do not require hardware for unit tests
+- Hardware smoke tests are optional and are not prerequisites for committing or
+  pushing. Record when hardware validation has not been performed.
+- When hardware testing is performed, smoke test `cli_esp32s3_idf5` (and
+  `cli_esp32s3_idf` when the legacy backend changed): boot + basic LED output.
 
 ---
 
@@ -223,16 +182,11 @@ When adding/modifying functionality, update README with:
 
 **If no, do not proceed.**
 
-**When adding features:**
-1. Output intended file tree changes (short summary)
-2. Apply edits (prefer additive changes over refactors)
-3. Update documentation (README + Doxygen)
-4. Summarize in <=10 bullets
-
 **Prefer:**
 - Additive changes over breaking changes
 - Optional features (Config flags) over mandatory changes
 - Explicit behavior over implicit magic
+- Refactoring a duplicated block over patching each copy
 
 ---
 
@@ -240,14 +194,14 @@ When adding/modifying functionality, update README with:
 
 Before committing:
 - [ ] Public API has Doxygen comments
-- [ ] README documents threading and timing model
+- [ ] README documents behavior changes (modes, presets, threading, timing)
 - [ ] Config struct has no hardcoded pins
 - [ ] `tick()` is non-blocking and bounded
 - [ ] Errors return Status, never silent
 - [ ] No heap allocation in steady state
 - [ ] No logging in library code
-- [ ] Examples demonstrate correct usage
+- [ ] Both CLIs still expose the same commands
 - [ ] CHANGELOG.md updated
-- [ ] Smoke test `cli_esp32s3_idf` and `cli_esp32s2_idf` on hardware (boot + basic LED output)
+- [ ] `pio test -e native -e native_max` passes
 
 **If any item fails, fix before proceeding.**

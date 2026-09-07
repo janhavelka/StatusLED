@@ -38,4 +38,5 @@ wifi_credentials.h
 *.log
 
 # Auto-generated files
-include/YourLibrary/Version.h
+# include/StatusLed/Version.h is tracked on purpose (ESP-IDF consumers do not run the generator)
+docs/doxygen/

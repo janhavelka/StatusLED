@@ -8,10 +8,10 @@
 
 #include <Arduino.h>
 #include <ctype.h>
-#include <stdlib.h>
 #include <string.h>
 
 #include "examples/common/BoardPins.h"
+#include "examples/common/CliParse.h"
 #include "examples/common/Log.h"
 #include "StatusLed/StatusLed.h"
 #include "StatusLed/Version.h"
@@ -143,37 +143,6 @@ static bool parse_preset(const char* s, StatusLed::StatusPreset* out) {
   return false;
 }
 
-static bool parse_u32(const char* s, uint32_t* out) {
-  if (!s || !*s) {
-    return false;
-  }
-  char* end = nullptr;
-  const unsigned long val = strtoul(s, &end, 10);
-  if (end == s) {
-    return false;
-  }
-  *out = static_cast<uint32_t>(val);
-  return true;
-}
-
-static bool parse_u8_range(const char* s, uint8_t* out, uint8_t maxValue) {
-  uint32_t value = 0;
-  if (!parse_u32(s, &value) || value > maxValue) {
-    return false;
-  }
-  *out = static_cast<uint8_t>(value);
-  return true;
-}
-
-static bool parse_u16_range(const char* s, uint16_t* out, uint16_t minValue, uint16_t maxValue) {
-  uint32_t value = 0;
-  if (!parse_u32(s, &value) || value < minValue || value > maxValue) {
-    return false;
-  }
-  *out = static_cast<uint16_t>(value);
-  return true;
-}
-
 static bool log_status(const StatusLed::Status& st) {
   if (!st.ok()) {
     LOGE("command failed: %s", st.msg);
@@ -244,7 +213,7 @@ static void print_help() {
   print_help_item("version", "Print build/version metadata");
   Serial.println();
   print_help_section("Lifecycle");
-  print_help_item("begin [pin] [count] [grb|rgb] [rmt] [smooth_ms]", "Initialize driver");
+  print_help_item("begin [pin] [count] [grb|rgb] [rmt] [smooth_ms] [full_frame]", "Initialize driver");
   print_help_item("end", "Stop driver");
   print_help_item("stress on [period_ms]", "Enable mixed stress mode");
   print_help_item("stress off", "Disable stress mode");
@@ -289,7 +258,9 @@ static void print_config() {
   Serial.print(F(" rmt="));
   Serial.print(g_leds.config().rmtChannel);
   Serial.print(F(" smoothStepMs="));
-  Serial.println(g_leds.config().smoothStepMs);
+  Serial.print(g_leds.config().smoothStepMs);
+  Serial.print(F(" fullFrame="));
+  Serial.println(g_leds.config().rmtFullFrameBuffer ? 1 : 0);
 }
 
 static void print_info() {
@@ -318,6 +289,11 @@ static void print_info() {
   } else {
     Serial.println("-");
   }
+  const StatusLed::Status output = g_leds.lastOutputStatus();
+  Serial.printf("Output errors: %lu last: code=%u detail=%ld msg=%s\n",
+                static_cast<unsigned long>(g_leds.outputErrorCount()),
+                static_cast<unsigned>(output.code), static_cast<long>(output.detail),
+                output.msg != nullptr && output.msg[0] != '\0' ? output.msg : "-");
 }
 
 static void print_status_one(uint8_t index) {
@@ -383,7 +359,8 @@ static void begin_default() {
   g_config.smoothStepMs = 20;
 
   const StatusLed::Status st = g_leds.begin(g_config);
-  g_initialized = st.ok();
+  g_initialized = g_leds.isInitialized();
+  g_config = g_leds.config();
   if (!st.ok()) {
     LOGE("begin failed: %s", st.msg);
     return;
@@ -470,12 +447,18 @@ static void handle_command(char* line) {
     StatusLed::ColorOrder order = StatusLed::ColorOrder::GRB;
     uint8_t rmt = 0;
     uint16_t smooth = 20;
+    uint8_t fullFrame = 0;
 
     if (argc > 1) {
-      pin = atoi(argv[1]);
+      uint8_t parsedPin = 0;
+      if (!cli::parseU8(argv[1], &parsedPin, UINT8_MAX)) {
+        LOGE("invalid data pin");
+        return;
+      }
+      pin = parsedPin;
     }
     if (argc > 2) {
-      if (!parse_u8_range(argv[2], &count, StatusLed::StatusLed::kMaxLedCount)) {
+      if (!cli::parseU8(argv[2], &count, StatusLed::StatusLed::kMaxLedCount)) {
         LOGE("invalid LED count");
         return;
       }
@@ -485,21 +468,29 @@ static void handle_command(char* line) {
         order = StatusLed::ColorOrder::RGB;
       } else if (strcmp(argv[3], "grb") == 0) {
         order = StatusLed::ColorOrder::GRB;
+      } else {
+        LOGE("invalid color order");
+        return;
       }
     }
     if (argc > 4) {
-      if (!parse_u8_range(argv[4], &rmt, 3)) {
+      if (!cli::parseU8(argv[4], &rmt, 3)) {
         LOGE("invalid RMT channel");
         return;
       }
     }
     if (argc > 5) {
-      if (!parse_u16_range(argv[5], &smooth, 5, 1000)) {
+      if (!cli::parseU16(argv[5], &smooth, 5, 1000)) {
         LOGE("invalid smooth_ms");
         return;
       }
     }
 
+    if (argc > 6 && !cli::parseU8(argv[6], &fullFrame, 1)) {
+      LOGE("invalid full_frame (0 or 1)");
+      return;
+    }
+    g_config.rmtFullFrameBuffer = fullFrame != 0;
     g_config.dataPin = pin;
     g_config.ledCount = count;
     g_config.colorOrder = order;
@@ -507,7 +498,8 @@ static void handle_command(char* line) {
     g_config.smoothStepMs = smooth;
 
     const StatusLed::Status st = g_leds.begin(g_config);
-    g_initialized = st.ok();
+    g_initialized = g_leds.isInitialized();
+    g_config = g_leds.config();
     if (!st.ok()) {
       LOGE("begin failed: %s", st.msg);
     } else {
@@ -531,8 +523,10 @@ static void handle_command(char* line) {
     }
     if (argc > 1) {
       uint32_t idx = 0;
-      if (parse_u32(argv[1], &idx)) {
+      if (cli::parseU32(argv[1], &idx) && idx <= UINT8_MAX) {
         print_status_one(static_cast<uint8_t>(idx));
+      } else {
+        LOGE("invalid index");
       }
     } else {
       for (uint8_t i = 0; i < g_config.ledCount; ++i) {
@@ -578,7 +572,7 @@ static void handle_command(char* line) {
 
   if (strcmp(argv[0], "mode") == 0 && argc >= 3) {
     uint32_t idx = 0;
-    if (!parse_u32(argv[1], &idx)) {
+    if (!cli::parseU32(argv[1], &idx)) {
       LOGE("invalid index");
       return;
     }
@@ -597,7 +591,7 @@ static void handle_command(char* line) {
 
   if (strcmp(argv[0], "modep") == 0 && argc >= 9) {
     uint32_t idx = 0;
-    if (!parse_u32(argv[1], &idx)) {
+    if (!cli::parseU32(argv[1], &idx)) {
       LOGE("invalid index");
       return;
     }
@@ -611,12 +605,12 @@ static void handle_command(char* line) {
       return;
     }
     StatusLed::ModeParams params;
-    if (!parse_u16_range(argv[3], &params.periodMs, 1, UINT16_MAX) ||
-        !parse_u16_range(argv[4], &params.onMs, 0, UINT16_MAX) ||
-        !parse_u16_range(argv[5], &params.riseMs, 0, UINT16_MAX) ||
-        !parse_u16_range(argv[6], &params.fallMs, 0, UINT16_MAX) ||
-        !parse_u8_range(argv[7], &params.minLevel, 255) ||
-        !parse_u8_range(argv[8], &params.maxLevel, 255)) {
+    if (!cli::parseU16(argv[3], &params.periodMs, 1, UINT16_MAX) ||
+        !cli::parseU16(argv[4], &params.onMs, 0, UINT16_MAX) ||
+        !cli::parseU16(argv[5], &params.riseMs, 0, UINT16_MAX) ||
+        !cli::parseU16(argv[6], &params.fallMs, 0, UINT16_MAX) ||
+        !cli::parseU8(argv[7], &params.minLevel, 255) ||
+        !cli::parseU8(argv[8], &params.maxLevel, 255)) {
       LOGE("invalid mode parameters");
       return;
     }
@@ -629,10 +623,10 @@ static void handle_command(char* line) {
     uint8_t r = 0;
     uint8_t g = 0;
     uint8_t b = 0;
-    if (parse_u32(argv[1], &idx) && idx <= UINT8_MAX &&
-        parse_u8_range(argv[2], &r, 255) &&
-        parse_u8_range(argv[3], &g, 255) &&
-        parse_u8_range(argv[4], &b, 255)) {
+    if (cli::parseU32(argv[1], &idx) && idx <= UINT8_MAX &&
+        cli::parseU8(argv[2], &r, 255) &&
+        cli::parseU8(argv[3], &g, 255) &&
+        cli::parseU8(argv[4], &b, 255)) {
       log_status(g_leds.setColor(static_cast<uint8_t>(idx), StatusLed::RgbColor(r, g, b)));
     } else {
       LOGE("invalid color args");
@@ -645,10 +639,10 @@ static void handle_command(char* line) {
     uint8_t r = 0;
     uint8_t g = 0;
     uint8_t b = 0;
-    if (parse_u32(argv[1], &idx) && idx <= UINT8_MAX &&
-        parse_u8_range(argv[2], &r, 255) &&
-        parse_u8_range(argv[3], &g, 255) &&
-        parse_u8_range(argv[4], &b, 255)) {
+    if (cli::parseU32(argv[1], &idx) && idx <= UINT8_MAX &&
+        cli::parseU8(argv[2], &r, 255) &&
+        cli::parseU8(argv[3], &g, 255) &&
+        cli::parseU8(argv[4], &b, 255)) {
       log_status(g_leds.setSecondaryColor(static_cast<uint8_t>(idx), StatusLed::RgbColor(r, g, b)));
     } else {
       LOGE("invalid color args");
@@ -659,7 +653,7 @@ static void handle_command(char* line) {
   if (strcmp(argv[0], "preset") == 0 && argc >= 3) {
     uint32_t idx = 0;
     StatusLed::StatusPreset preset;
-    if (!parse_u32(argv[1], &idx) || !parse_preset(argv[2], &preset)) {
+    if (!cli::parseU32(argv[1], &idx) || !parse_preset(argv[2], &preset)) {
       LOGE("invalid preset");
       return;
     }
@@ -674,7 +668,7 @@ static void handle_command(char* line) {
   if (strcmp(argv[0], "default") == 0 && argc >= 3) {
     uint32_t idx = 0;
     StatusLed::StatusPreset preset;
-    if (!parse_u32(argv[1], &idx) || !parse_preset(argv[2], &preset)) {
+    if (!cli::parseU32(argv[1], &idx) || !parse_preset(argv[2], &preset)) {
       LOGE("invalid preset");
       return;
     }
@@ -690,7 +684,7 @@ static void handle_command(char* line) {
     uint32_t idx = 0;
     uint32_t duration = 0;
     StatusLed::StatusPreset preset;
-    if (!parse_u32(argv[1], &idx) || !parse_preset(argv[2], &preset) || !parse_u32(argv[3], &duration)) {
+    if (!cli::parseU32(argv[1], &idx) || !parse_preset(argv[2], &preset) || !cli::parseU32(argv[3], &duration)) {
       LOGE("invalid temp args");
       return;
     }
@@ -705,8 +699,8 @@ static void handle_command(char* line) {
   if (strcmp(argv[0], "bright") == 0 && argc >= 3) {
     uint32_t idx = 0;
     uint8_t level = 0;
-    if (parse_u32(argv[1], &idx) && idx <= UINT8_MAX &&
-        parse_u8_range(argv[2], &level, 255)) {
+    if (cli::parseU32(argv[1], &idx) && idx <= UINT8_MAX &&
+        cli::parseU8(argv[2], &level, 255)) {
       log_status(g_leds.setBrightness(static_cast<uint8_t>(idx), level));
     } else {
       LOGE("invalid brightness args");
@@ -716,7 +710,7 @@ static void handle_command(char* line) {
 
   if (strcmp(argv[0], "gbright") == 0 && argc >= 2) {
     uint8_t level = 0;
-    if (parse_u8_range(argv[1], &level, 255)) {
+    if (cli::parseU8(argv[1], &level, 255)) {
       log_status(g_leds.setGlobalBrightness(level));
     } else {
       LOGE("invalid brightness");
@@ -733,7 +727,7 @@ static void handle_command(char* line) {
 
   if (strcmp(argv[0], "cleartemp") == 0 && argc >= 2) {
     uint32_t idx = 0;
-    if (parse_u32(argv[1], &idx) && idx <= UINT8_MAX) {
+    if (cli::parseU32(argv[1], &idx) && idx <= UINT8_MAX) {
       log_status(g_leds.clearTemporary(static_cast<uint8_t>(idx)));
     } else {
       LOGE("invalid index");
@@ -765,9 +759,9 @@ static void handle_command(char* line) {
     uint8_t r = 0;
     uint8_t g = 0;
     uint8_t b = 0;
-    if (parse_u8_range(argv[1], &r, 255) &&
-        parse_u8_range(argv[2], &g, 255) &&
-        parse_u8_range(argv[3], &b, 255)) {
+    if (cli::parseU8(argv[1], &r, 255) &&
+        cli::parseU8(argv[2], &g, 255) &&
+        cli::parseU8(argv[3], &b, 255)) {
       log_status(g_leds.setAllColor(StatusLed::RgbColor(r, g, b)));
     } else {
       LOGE("invalid color args");
@@ -792,7 +786,7 @@ static void handle_command(char* line) {
       g_stress.nextMs = millis();
       if (argc > 2) {
         uint16_t period = 0;
-        if (parse_u16_range(argv[2], &period, 1, UINT16_MAX)) {
+        if (cli::parseU16(argv[2], &period, 1, UINT16_MAX)) {
           g_stress.periodMs = period;
         } else {
           LOGE("invalid stress period");

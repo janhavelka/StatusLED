@@ -1,12 +1,13 @@
 {
   "name": "status-led",
-  "version": "1.3.0",
+  "version": "1.5.0",
   "description": "Production-grade status LED subsystem for ESP32-S2/S3 (WS2812, non-blocking, deterministic).",
   "keywords": [
     "esp32",
     "esp32-s2",
     "esp32-s3",
     "arduino",
+    "esp-idf",
     "platformio",
     "embedded",
     "status-led",
@@ -35,7 +36,8 @@
   "license": "MIT",
   "homepage": "https://github.com/janhavelka/StatusLED",
   "frameworks": [
-    "arduino"
+    "arduino",
+    "espidf"
   ],
   "platforms": [
     "espressif32"
