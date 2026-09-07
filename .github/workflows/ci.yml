@@ -94,7 +94,7 @@ jobs:
 
       - name: Enable cache-safe RMT interrupts
         if: matrix.cache_safe != ''
-        run: printf '%s\n' '${{ matrix.cache_safe }}' > examples/espidf_basic/sdkconfig.defaults
+        run: printf '\n%s\n' '${{ matrix.cache_safe }}' >> examples/espidf_basic/sdkconfig.defaults
 
       - name: Build native ESP-IDF example
         uses: espressif/esp-idf-ci-action@v1
@@ -102,3 +102,7 @@ jobs:
           esp_idf_version: ${{ matrix.idf_version }}
           target: ${{ matrix.target }}
           path: examples/espidf_basic
+
+      - name: Verify cache-safe RMT configuration
+        if: matrix.cache_safe != ''
+        run: grep -Fqx '${{ matrix.cache_safe }}' examples/espidf_basic/sdkconfig

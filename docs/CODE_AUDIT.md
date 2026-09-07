@@ -9,24 +9,29 @@ Full review of the animation engine, all four output backends, the examples and
 the documentation, checked against the WS2812 family datasheets and the ESP-IDF
 RMT driver sources (legacy 4.4 and RMT v2 5.3 through 6.0).
 
-Every finding below has been re-verified against the current tree and against
-the primary sources a second time. Where the first pass was wrong, the
-correction is stated inline rather than quietly dropped.
+At `a7e0e4e`, every finding below was re-verified against that tree and against
+the primary sources a second time. Corrections to that first pass were stated
+inline; subsequent corrections and implementation verdicts are recorded in
+[CODE_AUDIT_REVIEW.md](CODE_AUDIT_REVIEW.md).
 
 Findings whose fix was unambiguous were implemented in v1.4.0 and are listed in
 `CHANGELOG.md`; the "Resolved" section at the end says where to check each one.
-What remains here is **open**: issues whose fix is a trade-off, needs hardware
-validation, or changes behaviour that is currently field-proven. Each entry
-states the problem, the evidence, and one concrete proposal.
+The eight findings below were **open at `a7e0e4e`**: their proposed fixes involved
+trade-offs, hardware validation, or changes to behaviour then considered
+field-proven. Each entry retains the original problem, evidence and proposal
+for traceability. All eight have since been addressed; see
+[CODE_AUDIT_REVIEW.md](CODE_AUDIT_REVIEW.md) for the current implementation state
+and remaining qualification limits.
 
-Verification state of the code as it stands: 43 host unit tests pass, the
-legacy-RMT environment compiles, and the engine plus the RMT v2 backend compile
-clean against ESP-IDF 5.4 headers with `-Wall -Wextra -Werror`. Nothing has been
+Verification recorded for `a7e0e4e`: 43 host unit tests passed, the legacy-RMT
+environment compiled, and the engine plus the RMT v2 backend compiled clean
+against ESP-IDF 5.4 headers with `-Wall -Wextra -Werror`. Current test and CI
+results are in [CODE_AUDIT_REVIEW.md](CODE_AUDIT_REVIEW.md). Nothing has been
 tested on hardware.
 
 Severity is about production impact, not effort.
 
-## Open findings
+## Findings as they stood at `a7e0e4e`
 
 | #  | Issue | Severity | Proposal |
 | -- | ----- | -------- | -------- |

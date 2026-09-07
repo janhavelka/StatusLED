@@ -6,6 +6,13 @@ This review covers all eight findings and every entry marked "Verified correct"
 or "Resolved" in [CODE_AUDIT.md](CODE_AUDIT.md). That document is retained as the
 original assessment; the verdicts below describe the resulting implementation.
 
+The independent follow-up was checked against **fc92d52** on **2026-09-06**.
+Its evidence gaps and documentation drift were confirmed and corrected without
+changing engine behavior. The existing capacity builds did use different array
+sizes; the gap was that symbolic assertions could not detect a missing override.
+`native_max` now has an independent test marker requiring capacity 255, while
+`native` requires 10. All 60 test registrations are retained in each environment.
+
 ## Findings and decisions
 
 | Finding | Verdict and action | Why this solution; remaining limits |
@@ -109,9 +116,31 @@ of incorrectly marking a preserved running instance stopped.
 | Final S2/S3 IDF5 object inspection | Encoder/reset/completion functions are in IRAM sections; completion callback contains byte stores and barriers with no calls or locks. |
 | Documentation/source checks | Doxygen generation, text-integrity and `git diff --check` passed. |
 | Local native ESP-IDF 5.3.1 S3, cache-safe SDK | Passed using the native example sources and repository component through PlatformIO 6.9.0. Generated SDK config confirms `CONFIG_RMT_ISR_IRAM_SAFE=y`; linked library callbacks, SDK byte/copy encoders and TX ISR are in IRAM. |
-| Native ESP-IDF 5.3/6.0, S2/S3 CI | Configured; not yet executed. |
+| Native ESP-IDF 5.3/6.0, S2/S3 CI | All four jobs passed at `fc92d52` in [CI run 34042274325](https://github.com/janhavelka/StatusLED/actions/runs/34042274325), alongside six Arduino builds and both native suites. This run predates the follow-up workflow assertions. |
 | Hardware boot/basic LED smoke tests | Not performed; deferred. Hardware testing is optional under the engineering guidelines updated on 2026-09-06 and does not block commits or pushes. |
 | Waveforms, flash-write overlap, GPIO release and representative LED revisions | Not performed. |
+
+Follow-up coverage extends the existing tests with real output failures at
+`UINT32_MAX - 1` and `UINT32_MAX`, using a host-only friend to seed just the counter.
+Saturation, continued error-detail updates, busy exclusion and successful-output
+persistence are asserted through `tick()`. Both preset setters are checked with
+an active overlay and again with a valid replacement queued; the replacement's
+preset, duration and restoration are verified after rejection. Null-backend
+initialization failure injection verifies that both history fields are cleared,
+the initialization error is returned and a later initialization can recover.
+
+The strengthened suites pass **60/60 in each environment**. Seven mutations in
+an isolated copy were rejected: removing, misspelling or changing the capacity
+flag; replacing saturation with an unconditional increment; validating a temporary
+preset after changing state; and independently moving each history reset after
+successful backend initialization. These claims now have regression evidence,
+rather than inspection alone.
+
+CI now appends the cache-safe setting without overwriting existing SDK defaults
+and checks the exact enabled option in the generated `sdkconfig`. Local command
+probes check preservation of existing defaults, including a missing final newline,
+and rejection of disabled, unknown or absent options and a missing generated file.
+The new workflow assertions still require execution in GitHub Actions.
 
 The new tests cover fault persistence, retry deadlines/wraparound, busy coalescing,
 static output, capacity boundaries, overlay restoration, long-lived pulses,

@@ -13,7 +13,9 @@ namespace NullBackendTest {
 
 struct State {
   bool ready = true;
+  Status beginStatus{};
   Status showStatus{};
+  uint32_t beginCalls = 0;
   uint32_t canShowCalls = 0;
   uint32_t showCalls = 0;
   uint8_t frameCount = 0;
@@ -23,6 +25,13 @@ struct State {
 // Test controls are shared between null instances; each test resets them.
 State& state();
 void reset();
+
+// Seed only the counter; failures still pass through the real tick() path.
+struct EngineAccess {
+  static void seedOutputErrorCount(StatusLed& leds, uint32_t count) {
+    leds._outputErrors = count;
+  }
+};
 
 }  // namespace NullBackendTest
 }  // namespace StatusLed

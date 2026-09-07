@@ -164,7 +164,7 @@ Keep it dense: state constraints, units, side effects. Omit the obvious.
 
 ## Testing Expectations
 
-- Add host/unit tests (`pio test -e native`) for timing/state transitions
+- Add host/unit tests (`pio test -e native -e native_max`) for timing/state transitions
 - Tests must be deterministic and not rely on real time
 - Cover edge cases (wraparound, mode transitions, temporary-preset lifecycle)
 - Do not require hardware for unit tests
@@ -202,6 +202,6 @@ Before committing:
 - [ ] No logging in library code
 - [ ] Both CLIs still expose the same commands
 - [ ] CHANGELOG.md updated
-- [ ] `pio test -e native` passes
+- [ ] `pio test -e native -e native_max` passes
 
 **If any item fails, fix before proceeding.**

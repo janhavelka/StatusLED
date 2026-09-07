@@ -28,7 +28,14 @@ namespace {
 
 class BackendNull final : public BackendBase {
  public:
-  Status begin(const Config&) override { return Ok(); }
+  Status begin(const Config&) override {
+#if defined(STATUSLED_TEST)
+    ++NullBackendTest::state().beginCalls;
+    return NullBackendTest::state().beginStatus;
+#else
+    return Ok();
+#endif
+  }
   void end() override {}
 #if defined(STATUSLED_TEST)
   bool canShow() const override {

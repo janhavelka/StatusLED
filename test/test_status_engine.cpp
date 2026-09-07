@@ -1069,6 +1069,8 @@ static void test_output_errors_survive_success_and_reset_on_reinitialize() {
   TEST_ASSERT_FALSE(leds.begin(invalid).ok());
   TEST_ASSERT_TRUE(leds.isInitialized());
   TEST_ASSERT_EQUAL_UINT32(1, leds.outputErrorCount());
+  TEST_ASSERT_EQUAL_UINT32(1, backend.beginCalls);
+  TEST_ASSERT_EQUAL_INT32(-37, leds.lastOutputStatus().detail);
   leds.end();
   TEST_ASSERT_EQUAL_UINT32(1, leds.outputErrorCount());
   TEST_ASSERT_TRUE(leds.begin(make_config()).ok());
@@ -1076,6 +1078,30 @@ static void test_output_errors_survive_success_and_reset_on_reinitialize() {
   TEST_ASSERT_TRUE(leds.lastOutputStatus().ok());
   leds.tick(101);
   TEST_ASSERT_EQUAL_UINT32(3, backend.showCalls);
+
+  // Reach the boundary in bounded time, then exercise real failed submissions.
+  StatusLed::NullBackendTest::EngineAccess::seedOutputErrorCount(leds, UINT32_MAX - 1u);
+  backend.showStatus = StatusLed::Error(StatusLed::Err::HARDWARE_FAULT, -38, "fault at limit");
+  leds.forceRefresh();
+  leds.tick(102);
+  TEST_ASSERT_EQUAL_UINT32(4, backend.showCalls);
+  TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, leds.outputErrorCount());
+  TEST_ASSERT_EQUAL_INT32(-38, leds.lastOutputStatus().detail);
+  backend.showStatus = StatusLed::Error(StatusLed::Err::HARDWARE_FAULT, -39, "fault after limit");
+  leds.tick(202);
+  TEST_ASSERT_EQUAL_UINT32(5, backend.showCalls);
+  TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, leds.outputErrorCount());
+  TEST_ASSERT_EQUAL_INT32(-39, leds.lastOutputStatus().detail);
+  backend.showStatus = StatusLed::Error(StatusLed::Err::RESOURCE_BUSY, 1, "busy");
+  leds.tick(302);
+  TEST_ASSERT_EQUAL_UINT32(6, backend.showCalls);
+  TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, leds.outputErrorCount());
+  TEST_ASSERT_EQUAL_INT32(-39, leds.lastOutputStatus().detail);
+  backend.showStatus = StatusLed::Ok();
+  leds.tick(303);
+  TEST_ASSERT_EQUAL_UINT32(7, backend.showCalls);
+  TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, leds.outputErrorCount());
+  TEST_ASSERT_EQUAL_INT32(-39, leds.lastOutputStatus().detail);
 }
 
 static void test_busy_output_retries_without_error_and_coalesces() {
@@ -1151,6 +1177,32 @@ static void test_reinitialize_clears_pending_output_retry() {
   leds.tick(1001);
   TEST_ASSERT_EQUAL_UINT32(2, backend.showCalls);
   TEST_ASSERT_EQUAL_UINT32(0, leds.outputErrorCount());
+
+  backend.showStatus = StatusLed::Error(StatusLed::Err::HARDWARE_FAULT, 10, "second fault");
+  leds.forceRefresh();
+  leds.tick(1002);
+  TEST_ASSERT_EQUAL_UINT32(1, leds.outputErrorCount());
+  TEST_ASSERT_EQUAL_INT32(10, leds.lastOutputStatus().detail);
+  backend.beginStatus = StatusLed::Error(StatusLed::Err::HARDWARE_FAULT, -41, "begin failed");
+  const StatusLed::Status failed = leds.begin(make_config());
+  TEST_ASSERT_EQUAL_UINT16(static_cast<uint16_t>(StatusLed::Err::HARDWARE_FAULT),
+                         static_cast<uint16_t>(failed.code));
+  TEST_ASSERT_EQUAL_INT32(-41, failed.detail);
+  TEST_ASSERT_EQUAL_STRING("begin failed", failed.msg);
+  TEST_ASSERT_EQUAL_UINT32(3, backend.beginCalls);
+  TEST_ASSERT_FALSE(leds.isInitialized());
+  TEST_ASSERT_EQUAL_UINT32(0, leds.outputErrorCount());
+  TEST_ASSERT_TRUE(leds.lastOutputStatus().ok());
+  TEST_ASSERT_EQUAL_INT32(-41, leds.lastStatus().detail);
+  leds.tick(1003);
+  TEST_ASSERT_EQUAL_UINT32(3, backend.showCalls);
+
+  backend.beginStatus = StatusLed::Ok();
+  backend.showStatus = StatusLed::Ok();
+  TEST_ASSERT_TRUE(leds.begin(make_config()).ok());
+  leds.tick(1003);
+  TEST_ASSERT_EQUAL_UINT32(4, backend.showCalls);
+  TEST_ASSERT_EQUAL_UINT32(0, leds.outputErrorCount());
 }
 
 static void test_static_output_and_quantized_fades_do_not_retransmit() {
@@ -1182,6 +1234,13 @@ static void test_static_output_and_quantized_fades_do_not_retransmit() {
 }
 
 static void test_full_configured_capacity_and_last_index() {
+#if defined(STATUSLED_TEST_MAX_CAPACITY)
+  static_assert(StatusLed::StatusLed::kMaxLedCount == 255,
+                "native_max must compile with STATUSLED_MAX_LED_COUNT=255");
+#else
+  static_assert(StatusLed::StatusLed::kMaxLedCount == 10,
+                "native must compile with the default capacity of 10");
+#endif
   StatusLed::StatusLed leds;
   StatusLed::Config cfg = make_config();
   cfg.ledCount = StatusLed::StatusLed::kMaxLedCount;
@@ -1204,24 +1263,60 @@ static void test_full_configured_capacity_and_last_index() {
 }
 
 static void test_invalid_preset_preserves_active_and_pending_overlay() {
-  StatusLed::StatusLed leds;
-  TEST_ASSERT_TRUE(leds.begin(make_config()).ok());
-  TEST_ASSERT_TRUE(leds.setPreset(0, StatusLed::StatusPreset::Ready).ok());
-  leds.tick(0);
-  TEST_ASSERT_TRUE(leds.setTemporaryPreset(0, StatusLed::StatusPreset::Error, 1000).ok());
-  leds.tick(10);
-  TEST_ASSERT_TRUE(leds.setTemporaryPreset(0, StatusLed::StatusPreset::Critical, 100).ok());
-  TEST_ASSERT_FALSE(leds.setPreset(0, static_cast<StatusLed::StatusPreset>(255)).ok());
-  StatusLed::LedSnapshot snap;
-  TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
-  TEST_ASSERT_TRUE(snap.tempActive);
-  TEST_ASSERT_TRUE(snap.tempPending);
-  leds.tick(20);
-  leds.tick(120);
-  TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
-  TEST_ASSERT_FALSE(snap.tempActive);
-  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(StatusLed::StatusPreset::Ready),
-                         static_cast<uint8_t>(snap.preset));
+  // Both setters must reject before touching an active or queued overlay.
+  const bool temporarySetters[] = {false, true};
+  for (bool temporarySetter : temporarySetters) {
+    StatusLed::StatusLed leds;
+    TEST_ASSERT_TRUE(leds.begin(make_config()).ok());
+    TEST_ASSERT_TRUE(leds.setPreset(0, StatusLed::StatusPreset::Ready).ok());
+    leds.tick(0);
+    TEST_ASSERT_TRUE(leds.setTemporaryPreset(0, StatusLed::StatusPreset::Error, 1000).ok());
+    leds.tick(10);
+    const auto invalid = static_cast<StatusLed::StatusPreset>(255);
+    const StatusLed::Status activeRejected = temporarySetter
+        ? leds.setTemporaryPreset(0, invalid, 700)
+        : leds.setPreset(0, invalid);
+    TEST_ASSERT_EQUAL_UINT16(static_cast<uint16_t>(StatusLed::Err::INVALID_CONFIG),
+                           static_cast<uint16_t>(activeRejected.code));
+    StatusLed::LedSnapshot snap;
+    TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+    TEST_ASSERT_TRUE(snap.tempActive);
+    TEST_ASSERT_FALSE(snap.tempPending);
+    TEST_ASSERT_EQUAL_UINT32(1000, snap.tempRemainingMs);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(StatusLed::StatusPreset::Error),
+                           static_cast<uint8_t>(snap.preset));
+    leds.tick(15);
+    TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+    TEST_ASSERT_EQUAL_UINT32(995, snap.tempRemainingMs);
+
+    TEST_ASSERT_TRUE(leds.setTemporaryPreset(0, StatusLed::StatusPreset::Critical, 100).ok());
+    const StatusLed::Status pendingRejected = temporarySetter
+        ? leds.setTemporaryPreset(0, invalid, 700)
+        : leds.setPreset(0, invalid);
+    TEST_ASSERT_EQUAL_UINT16(static_cast<uint16_t>(StatusLed::Err::INVALID_CONFIG),
+                           static_cast<uint16_t>(pendingRejected.code));
+    TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+    TEST_ASSERT_TRUE(snap.tempActive);
+    TEST_ASSERT_TRUE(snap.tempPending);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(StatusLed::StatusPreset::Error),
+                           static_cast<uint8_t>(snap.preset));
+    leds.tick(20);
+    TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+    TEST_ASSERT_TRUE(snap.tempActive);
+    TEST_ASSERT_FALSE(snap.tempPending);
+    TEST_ASSERT_EQUAL_UINT32(100, snap.tempRemainingMs);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(StatusLed::StatusPreset::Critical),
+                           static_cast<uint8_t>(snap.preset));
+    leds.tick(119);
+    TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+    TEST_ASSERT_TRUE(snap.tempActive);
+    TEST_ASSERT_EQUAL_UINT32(1, snap.tempRemainingMs);
+    leds.tick(120);
+    TEST_ASSERT_TRUE(leds.getLedSnapshot(0, &snap).ok());
+    TEST_ASSERT_FALSE(snap.tempActive);
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(StatusLed::StatusPreset::Ready),
+                           static_cast<uint8_t>(snap.preset));
+  }
 }
 
 static void test_temporary_overlay_pauses_blink_step() {

@@ -317,6 +317,10 @@ class BackendIdf5Ws2812 final : public BackendBase {
     if (err != ESP_OK) {
       _txBusy.store(false, std::memory_order_release);
       if (err == ESP_ERR_INVALID_STATE || err == ESP_ERR_TIMEOUT) {
+        // The nonblocking SDK queue reports INVALID_STATE when no descriptor
+        // is free. This relies on _installed implying rmt_enable() succeeded:
+        // the channel is private and callers must serialize show()/end().
+        // INVALID_STATE alone cannot distinguish a disabled-channel fault.
         return Status(Err::RESOURCE_BUSY, err, "rmt busy");
       }
       return Status(Err::HARDWARE_FAULT, err, "rmt_transmit failed");

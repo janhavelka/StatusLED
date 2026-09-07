@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.5.0] - 2026-09-07
 
 ### Added
 
@@ -22,6 +22,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Native capacity tests now independently require 10/255 LEDs, detecting a
+  missing or incorrect maximum-capacity compiler flag. Existing tests additionally
+  cover counter saturation, rejected temporary-preset ordering and output-history
+  clearing after a backend initialization failure using host-only controls.
+- Cache-safe ESP-IDF CI appends to existing SDK defaults and verifies the exact
+  option in the generated `sdkconfig`, rejecting unknown or ineffective settings.
+- Shared CLI parsing guards its wide-host overflow check by `ULONG_MAX`, retaining
+  strict 32-bit bounds without a redundant comparison on 32-bit `unsigned long`.
 - Restore ESP-IDF 6.0 builds on S2/S3 after the SDK moved the RMT channel-count
   capability into its HAL. Full-frame buffer validation keeps the total memory
   capacity, including borrowable RX blocks on S3, across IDF 5.x and 6.x.
@@ -52,6 +60,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+- Scoped the historical audit's findings and baseline verification to `a7e0e4e`,
+  with the implementation review providing the current state.
+- Aligned initialization-history wording, audit links and both native test
+  requirements; documented the IDF5 busy-error mapping's enabled-channel assumption.
 - Hardware smoke tests are optional in the engineering guidelines and no longer
   block commits or pushes; validation reports still state whether they were run.
 - Reverified every original audit finding, corrected its PSRAM, timing arithmetic,
@@ -298,4 +310,5 @@ documentation. Remaining operational limitations are documented in README.
 [1.0.0]: https://github.com/janhavelka/StatusLED/releases/tag/v1.0.0
 
 [1.4.0]: https://github.com/janhavelka/StatusLED/compare/v1.3.0...v1.4.0
-[Unreleased]: https://github.com/janhavelka/StatusLED/compare/v1.4.0...HEAD
+[1.5.0]: https://github.com/janhavelka/StatusLED/compare/v1.4.0...v1.5.0
+[Unreleased]: https://github.com/janhavelka/StatusLED/compare/v1.5.0...HEAD

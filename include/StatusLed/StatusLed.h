@@ -27,6 +27,12 @@ namespace StatusLed {
 
 struct BackendBase;
 
+#if STATUSLED_BACKEND_NULL && defined(STATUSLED_TEST)
+namespace NullBackendTest {
+struct EngineAccess;
+}
+#endif
+
 /**
  * @brief Simple RGB color.
  */
@@ -480,6 +486,11 @@ class StatusLed {
   uint8_t ledCount() const { return _config.ledCount; }
 
  private:
+#if STATUSLED_BACKEND_NULL && defined(STATUSLED_TEST)
+  // Host-only access to seed boundary states without adding a production API.
+  friend struct NullBackendTest::EngineAccess;
+#endif
+
   /// @brief Per-LED runtime state (animation + temporary-preset overlay).
   struct LedState {
     // Current appearance.

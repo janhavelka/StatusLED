@@ -2,7 +2,7 @@
 # Generated and maintained for unified API documentation.
 
 PROJECT_NAME           = "StatusLED"
-PROJECT_NUMBER         = "1.4.0"
+PROJECT_NUMBER         = "1.5.0"
 PROJECT_BRIEF          = "StatusLED embedded library API documentation"
 OUTPUT_DIRECTORY       = docs/doxygen
 CREATE_SUBDIRS         = NO
@@ -31,7 +31,8 @@ REFERENCED_BY_RELATION = YES
 REFERENCES_RELATION    = YES
 STRIP_CODE_COMMENTS    = NO
 
-INPUT                  = README.md CHANGELOG.md AGENTS.md CONTRIBUTING.md SECURITY.md include
+INPUT                  = README.md CHANGELOG.md AGENTS.md CONTRIBUTING.md SECURITY.md include \
+                         docs/CODE_AUDIT.md docs/CODE_AUDIT_REVIEW.md
 FILE_PATTERNS          = *.h *.hpp *.md
 RECURSIVE              = YES
 EXCLUDE_PATTERNS       = */.pio/* */.git/* */test/* */docs/doxygen/*

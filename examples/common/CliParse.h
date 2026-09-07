@@ -6,6 +6,7 @@
 #pragma once
 
 #include <errno.h>
+#include <limits.h>
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -20,9 +21,15 @@ inline bool parseU32(const char* text, uint32_t* out) {
   char* end = nullptr;
   errno = 0;
   const unsigned long value = strtoul(text, &end, 10);
-  if (errno != 0 || *end != '\0' || value > UINT32_MAX) {
+  if (errno != 0 || *end != '\0') {
     return false;
   }
+#if ULONG_MAX > UINT32_MAX
+  // strtoul can succeed above the output range on hosts with 64-bit long.
+  if (value > UINT32_MAX) {
+    return false;
+  }
+#endif
   *out = static_cast<uint32_t>(value);
   return true;
 }

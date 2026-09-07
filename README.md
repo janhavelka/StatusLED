@@ -26,7 +26,7 @@ Type `help` in the monitor. On Windows use `.\scripts\pio.cmd` instead of `pio`.
 
 ```ini
 lib_deps =
-  https://github.com/janhavelka/StatusLED.git#v1.4.0
+  https://github.com/janhavelka/StatusLED.git#v1.5.0
 build_flags =
   -DSTATUSLED_BACKEND_IDF5_WS2812=1   ; Arduino core 3.x (IDF 5.x)
   ; -DSTATUSLED_BACKEND_IDF_WS2812=1  ; Arduino core 2.x (IDF 4.4)
@@ -120,9 +120,10 @@ All setters return `NOT_INITIALIZED` before `begin()` and `INVALID_CONFIG` on a
 bad index, mode, or preset. `tick()` records backend transmit failures in
 `lastStatus()`, which a later successful setter can replace. For output health,
 poll `outputErrorCount()` and `lastOutputStatus()` instead. The counter saturates
-at `UINT32_MAX`; successful calls and frames preserve this history. A valid
-`begin()` attempt clears it when starting a new backend; engine validation errors
-preserve the running instance and its history. `RESOURCE_BUSY` is not an error.
+at `UINT32_MAX`; successful calls and frames preserve this history. A `begin()`
+attempt that passes engine validation clears it before backend initialization,
+even if that initialization fails. Engine validation errors preserve the running
+instance and its history. `RESOURCE_BUSY` is not an error.
 After a non-busy failure, output polling and retry pause for 100 ms while
 animations continue and pending updates coalesce.
 
@@ -371,6 +372,11 @@ Host-based unit tests for timing and state transitions:
 pio test -e native -e native_max
 ```
 
+Both environments run 60 tests. Independent compile-time expectations require
+capacity 10 in `native` and 255 in `native_max`; removing or mistyping the latter's
+`STATUSLED_MAX_LED_COUNT` flag fails the build. Host-only controls exercise
+counter saturation and backend initialization failure without hardware or waits.
+
 Requires a host C++ compiler (GCC/Clang). On Windows, install MinGW-w64 and make
 sure `g++` is in `PATH`.
 
@@ -383,8 +389,8 @@ valid header.
 
 ```cpp
 #include "StatusLed/Version.h"
-Serial.println(StatusLed::VERSION);       // "1.4.0"
-Serial.println(StatusLed::VERSION_FULL);  // "1.4.0 (commit, date time)"
+Serial.println(StatusLed::VERSION);       // "1.5.0"
+Serial.println(StatusLed::VERSION_FULL);  // "1.5.0 (commit, date time)"
 ```
 
 ## API Documentation
@@ -412,16 +418,19 @@ src/StatusLedBackend*.cpp
                         One output backend per file (Idf, Idf5, NeoPixelBus, Null)
 examples/01_status_led_cli/   Arduino CLI
 examples/espidf_basic/        Native ESP-IDF CLI
-examples/common/              Example-only helpers (BoardPins.h, Log.h)
+examples/common/              Example-only helpers (BoardPins.h, CliParse.h, Log.h)
 test/                   Host unit tests (Unity)
 scripts/                Version generator, text-integrity check, pio wrapper
-docs/                   Audit report
+docs/                   Historical audit and implementation review
 CMakeLists.txt, idf_component.yml   ESP-IDF component definition
 ```
 
 ## See Also
 
 - `CHANGELOG.md` - version history
-- `docs/CODE_AUDIT.md` - audit findings that remain open, with proposals
+- [docs/CODE_AUDIT.md](docs/CODE_AUDIT.md) - historical audit of `a7e0e4e`,
+  whose findings were subsequently addressed
+- [docs/CODE_AUDIT_REVIEW.md](docs/CODE_AUDIT_REVIEW.md) - implementation verdicts,
+  verification evidence and remaining hardware qualification
 - `SECURITY.md` - security policy
 - `AGENTS.md` - engineering guidelines for contributors and AI agents
