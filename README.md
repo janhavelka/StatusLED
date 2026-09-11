@@ -328,6 +328,12 @@ shifts down the chain instead of latching.
 
 Both CLIs accept the same commands and the same mode/preset names. Useful
 diagnostics: `help`, `version`, `info`, `status`, `config`, `last`.
+Both start LED output during boot using the example defaults (GPIO21, two LEDs).
+Set `STATUSLED_EXAMPLE_DATA_PIN` and `STATUSLED_EXAMPLE_LED_COUNT` in the
+example's build flags before flashing another board; for example,
+`-DSTATUSLED_EXAMPLE_DATA_PIN=1 -DSTATUSLED_EXAMPLE_LED_COUNT=3` selects three
+LEDs on GPIO1. These flags affect both examples, not the library configuration.
+The count must also fit the library's configured `STATUSLED_MAX_LED_COUNT`.
 `info` includes persistent output health. `begin [pin] [count] [grb|rgb] [rmt]
 [smooth_ms] [full_frame]` accepts an optional final 0/1 switch for full-frame RMT
 buffering (default 0). For example, `begin 21 2 grb 0 20 1` enables it on two
