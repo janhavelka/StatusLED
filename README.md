@@ -10,6 +10,12 @@ health, error blips), plus the bundled CLI example for bench-testing a board.
 
 PlatformIO package name: `status-led`.
 
+The latest published release is
+[v1.3.0](https://github.com/janhavelka/StatusLED/releases/tag/v1.3.0). The
+package and component metadata in this development tree report `1.5.0`, but no
+`v1.4.0` or `v1.5.0` tag has been published. This README describes the current
+unreleased API.
+
 ## Quickstart (bench CLI)
 
 ```bash
@@ -26,7 +32,7 @@ Type `help` in the monitor. On Windows use `.\scripts\pio.cmd` instead of `pio`.
 
 ```ini
 lib_deps =
-  https://github.com/janhavelka/StatusLED.git#v1.5.0
+  https://github.com/janhavelka/StatusLED.git#2442247d5148c85bd9ba0c1f18bfcb7426ee3b7d
 build_flags =
   -DSTATUSLED_BACKEND_IDF5_WS2812=1   ; Arduino core 3.x (IDF 5.x)
   ; -DSTATUSLED_BACKEND_IDF_WS2812=1  ; Arduino core 2.x (IDF 4.4)
@@ -34,15 +40,18 @@ build_flags =
 
 Exactly one `STATUSLED_BACKEND_*` macro must be `1`; the build fails otherwise.
 For host/native test environments use `-DSTATUSLED_BACKEND_NULL=1`.
+Use `#v1.3.0` instead when you need the latest published release; it predates
+the unreleased additions documented below.
 
 ### ESP-IDF component
 
 The repository root is an ESP-IDF component (`CMakeLists.txt`,
 `idf_component.yml`), supported on ESP-IDF 5.3 and newer, 6.x included. Add it
 under `components/` or point `EXTRA_COMPONENT_DIRS` at it, then
-`REQUIRES StatusLED` from your `main` component. The component compiles only the engine and the IDF5 RMT backend and
-defines `STATUSLED_BACKEND_IDF5_WS2812=1` publicly. Legacy RMT and NeoPixelBus
-are never compiled in an ESP-IDF build.
+`REQUIRES StatusLED` from your `main` component. The component compiles only the
+engine and the IDF5 RMT backend and defines
+`STATUSLED_BACKEND_IDF5_WS2812=1` publicly. Legacy RMT and NeoPixelBus are never
+compiled in an ESP-IDF build.
 
 Note: ESP-IDF names a component after its directory, so the checkout must be
 named `StatusLED` (or adjust the `REQUIRES` entry).
@@ -111,10 +120,12 @@ NeoPixelBus environments are also provided (opt-in, Arduino core 2.x only):
 | `Status clear()`                           | All LEDs off, all per-LED state reset        |
 | `void forceRefresh()`                      | Retransmit the current frame on next tick    |
 | `Status getLedSnapshot(i, out)`            | Read current LED state                       |
-| `const Config& config()`                   | Configuration accepted by `begin()`          |
-| `Status lastStatus()`                      | Last status of a fallible operation          |
-| `uint32_t outputErrorCount()`               | Persistent count of failed output submissions |
-| `Status lastOutputStatus()`                 | Most recent output failure since initialization |
+| `static ModeParams getModeDefaults(mode)`  | Return the built-in parameters for a mode    |
+| `bool isInitialized()` / `uint8_t ledCount()` | Inspect lifecycle and accepted LED count  |
+| `config()` / `getConfig()`                 | Inspect active/last-accepted configuration    |
+| `lastStatus()` / `getLastStatus()`         | Read the last fallible-operation status      |
+| `uint32_t outputErrorCount()`              | Count failed output submissions persistently |
+| `Status lastOutputStatus()`                | Read the most recent output failure          |
 
 All setters return `NOT_INITIALIZED` before `begin()` and `INVALID_CONFIG` on a
 bad index, mode, or preset. `tick()` records backend transmit failures in
@@ -135,8 +146,9 @@ animations continue and pending updates coalesce.
   current preset. `setMode`/`setColor` afterwards mark the preset as `Off`
   (custom state).
 - **Temporary preset** overlays the LED for a duration. It activates on the next
-  `tick()`, snapshots the state below it (mode, params, colors, preset and animation progress) and
-  restores that state when the duration elapses or `clearTemporary()` is called.
+  `tick()`, snapshots the state below it (mode, params, colors, preset and
+  animation progress), and restores that state when the duration elapses or
+  `clearTemporary()` is called.
   The underlying animation pauses during the overlay, including blink/pattern
   phase and the time remaining until its next step; completed fades stay complete.
   Calling `setTemporaryPreset()` again while active just replaces the overlay
@@ -240,7 +252,9 @@ driver family ends up in a binary.
 | `STATUSLED_BACKEND_NULL=1`        | none                                  | host tests                              |
 
 `Config::rmtChannel` selects the channel for the legacy and NeoPixelBus
-backends. The RMT v2 backend lets the driver allocate a channel and ignores it.
+backends. The RMT v2 backend lets the driver allocate a channel and otherwise
+ignores this field, but the common configuration validator still requires a
+portable value in the range 0..3.
 
 The two RMT backends share WS2812 timing constants (T0H 0.325 us, T0L
 0.925 us, T1H 0.80 us, T1L 0.45 us at 40 MHz RMT resolution), append a 300 us
@@ -250,18 +264,19 @@ that to the pinned NeoPixelBus 2.7.6 implementation, whose waveform is unchanged
 `show()` returns `RESOURCE_BUSY` while a previous frame is still on
 the wire; the engine keeps the frame dirty and retries on the next `tick()`.
 
-The 300 us gap matters: WorldSemi raised the required reset time from 50 us to
-280 us for the WS2812B-V5 and WS2812B-2020 generations. With a shorter gap those
-parts treat the next frame as a continuation of the previous one and pixel data
-shifts down the chain instead of latching.
+The 300 us gap matters: the WS2812B-V5 specification requires more than 280 us,
+while an older WS2812B specification requires only 50 us. With a shorter gap,
+newer revisions can treat the next frame as a continuation of the previous one
+and shift pixel data down the chain instead of latching.
 
 ### Hardware notes
 
-- **Logic level.** WS2812/WS2812B parts made before about 2017 specify
-  `VIH = 0.7 x VDD`, which is 3.5 V on a 5 V supply and above what an
-  ESP32-S2/S3 pin drives. WS2812B-V5 and WS2812C-2020 relaxed this to 2.7 V and
-  work directly on 3.3 V. For older stock use a level shifter, a 74AHCT buffer,
-  or drop the first LED's supply with a series diode.
+- **Logic level.** Older WS2812B specifications use `VIH = 0.7 x VDD`, which is
+  3.5 V on a 5 V supply and above what an ESP32-S2/S3 pin drives. The
+  WS2812B-V5 specification uses a fixed 2.7 V minimum. Identify the exact part
+  revision rather than inferring it from purchase or manufacturing date. When
+  in doubt, use a 3.3-to-5 V level shifter such as a 74AHCT buffer, or lower the
+  first LED's supply within its allowed range.
 - **Data line at rest.** `end()` blanks the LEDs and leaves the data pin driven
   low, which is the idle state WS2812 parts expect.
 - **Flash writes.** Default one-block streaming can be interrupted when flash
@@ -270,12 +285,15 @@ shifts down the chain instead of latching.
   `Config::rmtFullFrameBuffer = true` to keep the entire frame, 300 us reset and
   stop marker in peripheral memory. This avoids timing-critical refills at the
   cost of adjacent RMT blocks. Ten LEDs need six 48-word blocks on S3 and all
-  four 64-word blocks on S2. Two LEDs need two blocks on S3 or one on S2.
+  four 64-word blocks on S2. Two LEDs need two blocks on S3 or one on S2. A
+  single full-frame instance fits at most 15 LEDs on S3 or 10 on S2, subject to
+  RMT placement and availability.
   Oversized frames or an unsuitable legacy start channel return `INVALID_CONFIG`;
   unavailable resources return an error rather than silently falling back.
   Coordinate legacy RMT resource initialization and shared interrupt policy with
-  other users; do not allocate overlapping channels concurrently. Full-frame mode is ignored by NeoPixelBus
-  and Null. Larger strips can still use default streaming.
+  other users; do not allocate overlapping channels concurrently. Full-frame
+  mode is ignored by NeoPixelBus and Null. Larger strips can still use default
+  streaming.
 - **Cache-safe ESP-IDF builds.** The IDF5 callbacks/encoder functions reside in
   IRAM, and both RMT backend objects are allocated once in internal RAM. Enable
   `CONFIG_RMT_ISR_IRAM_SAFE` on IDF 5.3/5.4 or
@@ -296,12 +314,25 @@ shifts down the chain instead of latching.
 - Default streaming still requires scheduling away from flash operations when
   the SDK does not enable cache-safe RMT interrupts. Use full-frame buffering
   where the peripheral memory budget permits it.
-- Concurrent projects installing different Arduino framework versions can replace
-  a shared framework directory while another build uses it. Serialize those
-  builds/installations or give concurrently active platform families separate
-  short `PLATFORMIO_CORE_DIR` paths. The wrapper still uses the same installed
-  VS Code-managed Core executable. Matching installed versions are resolved by
-  metadata; a sequential environment switch does not inherently copy files.
+- Installing different Arduino platform families into one PlatformIO package
+  store can replace or detach shared framework/tool packages. This can interrupt
+  a concurrent build and can also break a sequential switch when URL-pinned and
+  registry packages use the same unsuffixed directory. Give the core-2 and
+  core-3 families separate short
+  [`PLATFORMIO_CORE_DIR`](https://docs.platformio.org/en/latest/projectconf/sections/platformio/options/directory/core_dir.html)
+  paths. The wrapper still uses the same installed VS Code-managed Core
+  executable; only packages and toolchains are isolated.
+
+### Datasheet references
+
+LED timing and input thresholds vary by model and revision. The implementation
+was checked against these retained source references:
+
+- [older WS2812B specification](https://cdn-shop.adafruit.com/datasheets/WS2812B.pdf)
+- [later WS2812B specification](https://docs.electrokit.com/modules/EKM019/WS2812B.pdf)
+- [WS2812B-V5 specification](https://www.world-semi.co.kr/_files/ugd/89cd03_1023b0e9d135431aa1e6491bfc318112.pdf)
+- [SK6812 Rev. 01 specification](https://cdn-shop.adafruit.com/product-files/1138/SK6812%20LED%20datasheet%20.pdf)
+- [later SK6812 specification](https://www.ledyilighting.com/wp-content/uploads/2025/02/SK6812-datasheet.pdf)
 
 ## Runtime Model
 
@@ -328,6 +359,12 @@ shifts down the chain instead of latching.
 
 Both CLIs accept the same commands and the same mode/preset names. Useful
 diagnostics: `help`, `version`, `info`, `status`, `config`, `last`.
+Both start LED output during boot using the example defaults (GPIO21, two LEDs).
+Set `STATUSLED_EXAMPLE_DATA_PIN` and `STATUSLED_EXAMPLE_LED_COUNT` in the
+example's build flags before flashing another board; for example,
+`-DSTATUSLED_EXAMPLE_DATA_PIN=1 -DSTATUSLED_EXAMPLE_LED_COUNT=3` selects three
+LEDs on GPIO1. These flags affect both examples, not the library configuration.
+The count must also fit the library's configured `STATUSLED_MAX_LED_COUNT`.
 `info` includes persistent output health. `begin [pin] [count] [grb|rgb] [rmt]
 [smooth_ms] [full_frame]` accepts an optional final 0/1 switch for full-frame RMT
 buffering (default 0). For example, `begin 21 2 grb 0 20 1` enables it on two
@@ -344,8 +381,8 @@ idf.py set-target esp32s3
 idf.py build flash monitor
 ```
 
-Windows note: use separate short storage directories if concurrent projects
-install different framework versions, or if package extraction hits path limits:
+Windows note: use separate short storage directories for the Arduino core-2 and
+core-3 platform families, and when package extraction hits path limits:
 
 ```powershell
 $env:PLATFORMIO_CORE_DIR = "C:\sl-pio2"
@@ -372,6 +409,8 @@ Host-based unit tests for timing and state transitions:
 pio test -e native -e native_max
 ```
 
+On Windows, run the same arguments through `.\scripts\pio.cmd`.
+
 Both environments run 60 tests. Independent compile-time expectations require
 capacity 10 in `native` and 255 in `native_max`; removing or mistyping the latter's
 `STATUSLED_MAX_LED_COUNT` flag fails the build. Host-only controls exercise
@@ -389,8 +428,8 @@ valid header.
 
 ```cpp
 #include "StatusLed/Version.h"
-Serial.println(StatusLed::VERSION);       // "1.5.0"
-Serial.println(StatusLed::VERSION_FULL);  // "1.5.0 (commit, date time)"
+Serial.println(StatusLed::VERSION);       // package version
+Serial.println(StatusLed::VERSION_FULL);  // package version plus commit and build time
 ```
 
 ## API Documentation
@@ -421,16 +460,11 @@ examples/espidf_basic/        Native ESP-IDF CLI
 examples/common/              Example-only helpers (BoardPins.h, CliParse.h, Log.h)
 test/                   Host unit tests (Unity)
 scripts/                Version generator, text-integrity check, pio wrapper
-docs/                   Historical audit and implementation review
 CMakeLists.txt, idf_component.yml   ESP-IDF component definition
 ```
 
 ## See Also
 
 - `CHANGELOG.md` - version history
-- [docs/CODE_AUDIT.md](docs/CODE_AUDIT.md) - historical audit of `a7e0e4e`,
-  whose findings were subsequently addressed
-- [docs/CODE_AUDIT_REVIEW.md](docs/CODE_AUDIT_REVIEW.md) - implementation verdicts,
-  verification evidence and remaining hardware qualification
+- `CONTRIBUTING.md` - contribution and validation workflow
 - `SECURITY.md` - security policy
-- `AGENTS.md` - engineering guidelines for contributors and AI agents

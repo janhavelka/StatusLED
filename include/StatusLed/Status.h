@@ -47,13 +47,20 @@ struct Status {
   const char* msg = "";     ///< Human-readable message (STATIC STRING ONLY)
 
   /// @brief Default constructor creates OK status.
+  /// @note Performs no allocation.
   constexpr Status() : code(Err::OK), detail(0), msg("") {}
 
-  /// @brief Constructor with all fields.
+  /// @brief Construct a status with all fields.
+  /// @param c Error category.
+  /// @param d Vendor/library-specific detail value.
+  /// @param m Static message string.
+  /// @note The caller must keep m valid for the Status lifetime; library
+  ///       results always use static string literals.
   constexpr Status(Err c, int32_t d, const char* m) : code(c), detail(d), msg(m) {}
 
   /// @brief Create a success Status.
   /// @return Status with Err::OK.
+  /// @note Performs no allocation.
   static constexpr Status Ok() { return Status(Err::OK, 0, ""); }
 
   /// @brief Create an error Status.
@@ -61,21 +68,26 @@ struct Status {
   /// @param d Vendor/library-specific detail value.
   /// @param m Static message string.
   /// @return Status with supplied error fields.
+  /// @note The caller must keep m valid for the Status lifetime; library
+  ///       results always use static string literals.
   static constexpr Status Error(Err c, int32_t d = 0, const char* m = "") {
     return Status(c, d, m);
   }
 
   /// @brief Check if operation succeeded.
   /// @return true if code == Err::OK
+  /// @note Has no side effects.
   constexpr bool ok() const { return code == Err::OK; }
 
   /// @brief Check whether the operation should be retried later.
   /// @return true for transient RESOURCE_BUSY results.
+  /// @note Has no side effects.
   constexpr bool inProgress() const { return code == Err::RESOURCE_BUSY; }
 };
 
 /// @brief Create a success Status.
 /// @return Status with Err::OK
+/// @note Performs no allocation.
 constexpr Status Ok() { return Status::Ok(); }
 
 /// @brief Create an error Status.
@@ -83,6 +95,8 @@ constexpr Status Ok() { return Status::Ok(); }
 /// @param detail Vendor/library-specific detail value.
 /// @param msg Static message string.
 /// @return Status with supplied error fields.
+/// @note The caller must keep msg valid for the Status lifetime; library
+///       results always use static string literals.
 constexpr Status Error(Err code, int32_t detail = 0, const char* msg = "") {
   return Status::Error(code, detail, msg);
 }

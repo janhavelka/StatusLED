@@ -5,10 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.5.0] - 2026-09-07
+## [Unreleased]
+
+The latest published release is `1.3.0`. Package and component metadata in the
+development tree report `1.5.0`, but the changes below remain unreleased.
 
 ### Added
 
+- Example-only build flags for the LED data pin and count, so both CLIs can
+  use the intended board wiring from their first output during boot.
+- Native ESP-IDF component support for ESP32-S2/S3 on ESP-IDF 5.3 and newer,
+  plus a command-compatible `app_main` CLI example with no Arduino facade.
+- Zero-allocation `Status::Ok()`, `Status::Error()`, free `Error()` and
+  `Status::inProgress()` helpers, plus `config()` and `lastStatus()` accessor
+  aliases.
 - Persistent `outputErrorCount()` and `lastOutputStatus()` diagnostics. The
   counter saturates, excludes `RESOURCE_BUSY`, and survives successful calls
   and output until a new validated initialization attempt.
@@ -18,10 +28,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reset and stop-marker memory before output to avoid flash-write refill glitches.
   Invalid sizes/channels and unavailable resources return errors.
 - CI builds Arduino RMT v2 on S2/S3 and the native ESP-IDF component on 5.3/6.0,
-  including cache-safe S3 configurations; feature branches run the same checks.
+  including cache-safe S3 configurations; all branches run the same checks.
+- Deterministic host coverage expanded to 60 tests in each of the default- and
+  maximum-capacity native environments.
+- A Windows PlatformIO wrapper that uses the current user's VS Code-managed
+  Core without installing another copy.
+- Doxygen configuration for the public API and maintained project documents.
+- CLI `version` and `info` diagnostics for build, backend, configuration and
+  status inspection.
 
 ### Fixed
 
+- CI now covers every branch push, including fix branches, with a pinned
+  PlatformIO Core version.
 - Native capacity tests now independently require 10/255 LEDs, detecting a
   missing or incorrect maximum-capacity compiler flag. Existing tests additionally
   cover counter saturation, rejected temporary-preset ordering and output-history
@@ -30,7 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   option in the generated `sdkconfig`, rejecting unknown or ineffective settings.
 - Shared CLI parsing guards its wide-host overflow check by `ULONG_MAX`, retaining
   strict 32-bit bounds without a redundant comparison on 32-bit `unsigned long`.
-- Restore ESP-IDF 6.0 builds on S2/S3 after the SDK moved the RMT channel-count
+- Restored ESP-IDF 6.0 builds on S2/S3 after the SDK moved the RMT channel-count
   capability into its HAL. Full-frame buffer validation keeps the total memory
   capacity, including borrowable RX blocks on S3, across IDF 5.x and 6.x.
 - Non-busy output failures defer polling/retry for 100 ms using wraparound-safe
@@ -43,8 +62,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   remain unchanged; compatibility still requires qualification of the LED revision.
 - Legacy failed-initialization cleanup releases the GPIO even when driver
   installation fails. IDF5 shutdown explicitly detaches the GPIO matrix on
-  ESP-IDF 6.x as well as 5.x. Shutdown submits the blank frame asynchronously and waits
-  within a fixed budget. Legacy resource checks reject overlapping active blocks.
+  ESP-IDF 6.x as well as 5.x. Shutdown submits the blank frame asynchronously
+  and waits within a fixed budget. Legacy resource checks reject overlapping
+  active blocks.
 - Pulse modes normalize their clock origin each cycle, retaining phase after
   more than 49.7 days of continuous operation.
 - Temporary overlays preserve blink/pattern phase and remaining step time, as
@@ -57,30 +77,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rejected reinitialization, preserving a still-running instance.
 - NeoPixelBus 2.7.6 dependencies use the exact upstream Git commit because the
   previous registry specification no longer resolves on a clean installation.
-
-### Documentation
-
-- Regenerated the tracked version header from the clean merged tree before
-  tagging v1.5.0, so ESP-IDF consumers receive clean release metadata.
-- Scoped the historical audit's findings and baseline verification to `a7e0e4e`,
-  with the implementation review providing the current state and a successful
-  12-job CI run that executed the follow-up cache-safe SDK assertions.
-- Aligned initialization-history wording, audit links and both native test
-  requirements; documented the IDF5 busy-error mapping's enabled-channel assumption.
-- Hardware smoke tests are optional in the engineering guidelines and no longer
-  block commits or pushes; validation reports still state whether they were run.
-- Reverified every original audit finding, corrected its PSRAM, timing arithmetic,
-  package-switching and resolved-cleanup claims, and recorded the decisions and
-  validation limits in `docs/CODE_AUDIT_REVIEW.md`.
-- Documented RMT memory costs, cache-safe SDK settings, output retry/health
-  semantics, capacity ABI requirements and remaining timing limitations.
-
-## [1.4.0] - 2026-09-04
-
-Correctness release from a full audit of the engine, both RMT backends and the
-documentation. Remaining operational limitations are documented in README.
-
-### Fixed
 
 - **WS2812 latch gap.** The IDF5 RMT backend emitted no reset symbol at all, so
   two frames sent close together were concatenated by the LEDs: pixel data
@@ -137,6 +133,16 @@ documentation. Remaining operational limitations are documented in README.
 
 ### Changed
 
+- Example startup defaults are GPIO21 and two LEDs; Arduino serial monitor
+  configurations disable RTS/DTR resets and enable USB CDC on the S2 targets.
+- Consolidated durable hardware, timing, cache-safety, RMT resource and runtime
+  guidance in README, with retained WS2812B/WS2812B-V5/SK6812 datasheet links.
+- Corrected the published-release status, expanded the API overview and aligned
+  public Doxygen with actual validation and error behavior.
+- Documented separate PlatformIO package stores for the Arduino core-2 and
+  core-3 families; they continue to use the same installed Core executable.
+- Hardware smoke tests are optional before committing; contributors must record
+  whether hardware validation was performed.
 - **Temporary presets now have one consistent cancellation rule.** `setMode()`,
   `setColor()`, `setSecondaryColor()`, `setAllMode()` and `setAllColor()` cancel
   a temporary preset the way `setPreset()` always did, instead of being silently
@@ -181,40 +187,40 @@ documentation. Remaining operational limitations are documented in README.
 - The RMT v2 backend waits up to 50 ms rather than 10 ms for the queue to drain
   in `end()`, so a slow transfer completes instead of being abandoned.
 
-### Added
-
-- 15 regression tests, 43 host tests in total. They cover the engine fixes above.
-  The backend, CLI and configuration-rejection fixes are not reachable from the
-  host build and were verified by compilation and review instead.
-
 ### Removed
 
+- Completed code-audit and implementation-review reports. Their durable
+  conclusions, limitations and datasheet references now live in README and this
+  changelog.
 - `docs/IDF_PORT.md` and `docs/IDF_PORT_IMPLEMENTATION.md`: port work logs whose
   durable content is in README, and whose "current state" sections had gone
   stale.
 - `scripts/check_idf_example_contract.py`: a static text-matching guard on the
   ESP-IDF example that was not run by CI and duplicated review.
-- An unused `frameDurationUs()` helper and its bit-period constant, added during
-  the audit and never called.
+- An unused `frameDurationUs()` helper and its bit-period constant.
 
 ## [1.3.0] - 2026-03-01
 
 ### Changed
+
 - Refined CLI example/log presentation for consistency with the current unified help/reporting scheme.
 
 ### Fixed
+
 - Improved output readability by limiting emphasis to operationally important statuses.
 - IDF5 WS2812 backend no longer polls `rmt_tx_wait_all_done(..., 0)` in normal transmit flow, preventing repeated `flush timeout` log spam under high-frequency updates (e.g., CLI stress mode).
 
 ## [1.2.0] - 2026-02-24
 
 ### Added
+
 - ESP-IDF 5.x RMT v2 backend behind `STATUSLED_BACKEND_IDF5_WS2812` (compile-time selectable).
 - PlatformIO IDF5 build environments for ESP32-S2/S3 CLI example targets.
 
 ## [1.1.0] - 2026-02-22
 
 ### Added
+
 - `clear()` method to turn all LEDs off and reset state in a single call.
 - `clearTemporary(index)` method to cancel a temporary preset early and revert.
 - `setAllPreset(preset)` method to apply a preset to all configured LEDs.
@@ -230,6 +236,7 @@ documentation. Remaining operational limitations are documented in README.
 - CLI commands: `clear`, `cleartemp`, `allpreset`, `allmode`, `allcolor`, `refresh`.
 
 ### Fixed
+
 - LFSR zero-lockup: added guard to prevent FlickerCandle/Glitch modes from freezing if LFSR state reaches zero.
 - LFSR seed now properly initialized within 16-bit polynomial range (was 20-bit, causing unpredictable initial sequence).
 - Added bounds check in `refreshLedOutput(index)` single-argument overload to prevent out-of-bounds array access.
@@ -238,39 +245,22 @@ documentation. Remaining operational limitations are documented in README.
 ## [1.0.2] - 2026-02-11
 
 ### Added
+
 - Added `scripts/check_text_integrity.py` to fail fast on UTF-8 BOM in tracked text files.
 - Added CI enforcement for text-integrity checks in `.github/workflows/ci.yml`.
 
-### Changed
-- Nothing yet
-
-### Deprecated
-- Nothing yet
-
-### Removed
-- Nothing yet
-
 ### Fixed
-- Removed UTF-8 BOM from `library.json` and tracked source/header files to restore reliable PlatformIO manifest parsing from `lib_deps`.
 
-### Security
-- Nothing yet
+- Removed UTF-8 BOM from `library.json` and tracked source/header files to restore reliable PlatformIO manifest parsing from `lib_deps`.
 
 ## [1.0.1] - 2026-02-10
 
-### Added
-- Nothing yet
-
 ### Changed
+
 - Hardened scheduler internals to avoid `millis()` wraparound freeze edge cases.
 
-### Deprecated
-- Nothing yet
-
-### Removed
-- Nothing yet
-
 ### Fixed
+
 - Fixed descending interpolation in fade paths (e.g. `FadeOut`) to prevent intensity corruption.
 - Fixed a deadline sentinel collision that could freeze repeating modes near `uint32_t` timer wrap.
 - Added defensive config validation for invalid `colorOrder` and out-of-range `dataPin`.
@@ -278,12 +268,13 @@ documentation. Remaining operational limitations are documented in README.
 - Added regression tests for wraparound scheduling, fade-out behavior, and config validation.
 - Fixed PlatformIO env definitions so S2/S3 example targets always have explicit `board` configuration.
 
-### Security
-- Nothing yet
+### Includes earlier development work
 
-## [1.0.0] - 2026-02-02
+These changes were included in this published release; their earlier numbered
+notes did not correspond to separate published GitHub releases.
 
-### Added
+#### Added
+
 - StatusLed library with non-blocking status LED engine
 - Mode/preset architecture with color separation and dirty-frame updates
 - NeoPixelBus backend (RMT) with configurable channel selection
@@ -291,27 +282,23 @@ documentation. Remaining operational limitations are documented in README.
 - Interactive CLI example with full API access and stress test
 - Host-based unit tests for timing/state transitions
 
-### Changed
+#### Changed
+
 - Updated README and AGENTS guidelines for status LED subsystem
 - Updated PlatformIO environments and backend selection macros
 
-### Removed
+#### Removed
+
 - Removed compile-only example in favor of a single fully featured CLI demo
 
-### Fixed
+#### Fixed
+
 - Hardened backend selection guards and compilation isolation
 - Added bounds checks and nonblocking guards in backends and engine
 
-### Security
-- Nothing yet
-
+[Unreleased]: https://github.com/janhavelka/StatusLED/compare/v1.3.0...HEAD
 [1.3.0]: https://github.com/janhavelka/StatusLED/compare/v1.2.0...v1.3.0
-[1.2.0]: https://github.com/janhavelka/StatusLED/releases/tag/v1.2.0
-[1.1.0]: https://github.com/janhavelka/StatusLED/releases/tag/v1.1.0
-[1.0.2]: https://github.com/janhavelka/StatusLED/releases/tag/v1.0.2
+[1.2.0]: https://github.com/janhavelka/StatusLED/compare/v1.1.0...v1.2.0
+[1.1.0]: https://github.com/janhavelka/StatusLED/compare/v1.0.2...v1.1.0
+[1.0.2]: https://github.com/janhavelka/StatusLED/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/janhavelka/StatusLED/releases/tag/v1.0.1
-[1.0.0]: https://github.com/janhavelka/StatusLED/releases/tag/v1.0.0
-
-[1.4.0]: https://github.com/janhavelka/StatusLED/compare/v1.3.0...v1.4.0
-[1.5.0]: https://github.com/janhavelka/StatusLED/compare/v1.4.0...v1.5.0
-[Unreleased]: https://github.com/janhavelka/StatusLED/compare/v1.5.0...HEAD

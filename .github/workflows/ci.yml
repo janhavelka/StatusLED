@@ -3,10 +3,13 @@ name: CI
 
 on:
   push:
-    branches: [main, master, 'feature/**']
+    branches: ['**']
   pull_request:
     branches: [main, master]
   workflow_dispatch:
+
+env:
+  PLATFORMIO_VERSION: "6.1.19"
 
 jobs:
   build:
@@ -37,7 +40,7 @@ jobs:
       - name: Install PlatformIO
         run: |
           python -m pip install --upgrade pip
-          pip install platformio
+          pip install "platformio==${PLATFORMIO_VERSION}"
 
       - name: Build ${{ matrix.environment }}
         run: pio run -e ${{ matrix.environment }}
@@ -63,7 +66,7 @@ jobs:
       - name: Install PlatformIO
         run: |
           python -m pip install --upgrade pip
-          pip install platformio
+          pip install "platformio==${PLATFORMIO_VERSION}"
 
       - name: Run native tests (${{ matrix.environment }})
         run: pio test -e ${{ matrix.environment }}
