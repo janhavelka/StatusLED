@@ -7,8 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-The latest published release is `1.3.0`. Package and component metadata in the
-development tree report `1.5.0`, but the changes below remain unreleased.
+## [1.5.0] - 2026-09-12
 
 ### Added
 
@@ -133,6 +132,8 @@ development tree report `1.5.0`, but the changes below remain unreleased.
 
 ### Changed
 
+- CI uses the Node.js 24-based `actions/checkout@v7` and
+  `actions/setup-python@v7` releases.
 - Example startup defaults are GPIO21 and two LEDs; Arduino serial monitor
   configurations disable RTS/DTR resets and enable USB CDC on the S2 targets.
 - Consolidated durable hardware, timing, cache-safety, RMT resource and runtime
@@ -296,7 +297,8 @@ notes did not correspond to separate published GitHub releases.
 - Hardened backend selection guards and compilation isolation
 - Added bounds checks and nonblocking guards in backends and engine
 
-[Unreleased]: https://github.com/janhavelka/StatusLED/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/janhavelka/StatusLED/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/janhavelka/StatusLED/compare/v1.3.0...v1.5.0
 [1.3.0]: https://github.com/janhavelka/StatusLED/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/janhavelka/StatusLED/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/janhavelka/StatusLED/compare/v1.0.2...v1.1.0

@@ -10,11 +10,8 @@ health, error blips), plus the bundled CLI example for bench-testing a board.
 
 PlatformIO package name: `status-led`.
 
-The latest published release is
-[v1.3.0](https://github.com/janhavelka/StatusLED/releases/tag/v1.3.0). The
-package and component metadata in this development tree report `1.5.0`, but no
-`v1.4.0` or `v1.5.0` tag has been published. This README describes the current
-unreleased API.
+The latest release is
+[v1.5.0](https://github.com/janhavelka/StatusLED/releases/tag/v1.5.0).
 
 ## Quickstart (bench CLI)
 
@@ -32,7 +29,7 @@ Type `help` in the monitor. On Windows use `.\scripts\pio.cmd` instead of `pio`.
 
 ```ini
 lib_deps =
-  https://github.com/janhavelka/StatusLED.git#2442247d5148c85bd9ba0c1f18bfcb7426ee3b7d
+  https://github.com/janhavelka/StatusLED.git#v1.5.0
 build_flags =
   -DSTATUSLED_BACKEND_IDF5_WS2812=1   ; Arduino core 3.x (IDF 5.x)
   ; -DSTATUSLED_BACKEND_IDF_WS2812=1  ; Arduino core 2.x (IDF 4.4)
@@ -40,8 +37,7 @@ build_flags =
 
 Exactly one `STATUSLED_BACKEND_*` macro must be `1`; the build fails otherwise.
 For host/native test environments use `-DSTATUSLED_BACKEND_NULL=1`.
-Use `#v1.3.0` instead when you need the latest published release; it predates
-the unreleased additions documented below.
+Pinning the release tag keeps dependency resolution reproducible.
 
 ### ESP-IDF component
 
