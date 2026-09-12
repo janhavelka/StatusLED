@@ -27,7 +27,7 @@ backends and the documentation. Remaining operational limitations are documented
   reset and stop-marker memory before output to avoid flash-write refill glitches.
   Invalid sizes/channels and unavailable resources return errors.
 - CI builds Arduino RMT v2 on S2/S3 and the native ESP-IDF component on 5.3/6.0,
-  including cache-safe S3 configurations; feature branches run the same checks.
+  including cache-safe S3 configurations; all branches run the same checks.
 
 - 15 regression tests, 43 host tests in total. They cover the engine fixes above.
   The backend, CLI and configuration-rejection fixes are not reachable from the
@@ -35,6 +35,8 @@ backends and the documentation. Remaining operational limitations are documented
 
 ### Fixed
 
+- CI now covers every branch push, including fix branches, with a pinned
+  PlatformIO Core version.
 - Native capacity tests now independently require 10/255 LEDs, detecting a
   missing or incorrect maximum-capacity compiler flag. Existing tests additionally
   cover counter saturation, rejected temporary-preset ordering and output-history
