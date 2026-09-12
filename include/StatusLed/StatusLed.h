@@ -45,6 +45,7 @@ struct RgbColor {
   uint8_t b = 0;
 
   /// @brief Construct black/off color.
+  /// @note Performs no allocation or hardware access.
   constexpr RgbColor() = default;
 
   /**
@@ -52,12 +53,14 @@ struct RgbColor {
    * @param red Red channel intensity (0..255).
    * @param green Green channel intensity (0..255).
    * @param blue Blue channel intensity (0..255).
+   * @note Performs no allocation or hardware access.
    */
   constexpr RgbColor(uint8_t red, uint8_t green, uint8_t blue) : r(red), g(green), b(blue) {}
 
   /// @brief Compare RGB channel equality.
   /// @param other Color to compare.
   /// @return true when all three channels match.
+  /// @note Has no side effects.
   constexpr bool operator==(const RgbColor& other) const {
     return r == other.r && g == other.g && b == other.b;
   }
@@ -65,6 +68,7 @@ struct RgbColor {
   /// @brief Compare RGB channel inequality.
   /// @param other Color to compare.
   /// @return true when any channel differs.
+  /// @note Has no side effects.
   constexpr bool operator!=(const RgbColor& other) const { return !(*this == other); }
 };
 
@@ -213,14 +217,24 @@ class StatusLed {
   static constexpr uint8_t kMaxLedCount = STATUSLED_MAX_LED_COUNT;
 
   /// @brief Default constructor.
+  /// @note Does not allocate or acquire hardware; call begin() to initialize.
   StatusLed() = default;
 
   /// @brief Destructor releases backend resources.
+  /// @note Calls end(), including its bounded best-effort blanking behavior.
   ~StatusLed() { end(); }
 
-  /// @brief Non-copyable (owns backend pointer).
-  StatusLed(const StatusLed&) = delete;
-  StatusLed& operator=(const StatusLed&) = delete;
+  /// @brief Copy construction is disabled because the object owns a backend.
+  /// @param other Source object; copying is intentionally unavailable.
+  /// @note Use a separate instance and call begin() with its own resources.
+  StatusLed(const StatusLed& other) = delete;
+
+  /// @brief Copy assignment is disabled because the object owns a backend.
+  /// @param other Source object; copying is intentionally unavailable.
+  /// @return Reference to the assigned object; unavailable because the
+  ///         function is deleted.
+  /// @note Use end()/begin() to reconfigure an existing instance.
+  StatusLed& operator=(const StatusLed& other) = delete;
 
   /**
    * @brief Initialize the library with the given configuration.
@@ -247,6 +261,9 @@ class StatusLed {
    * Blanks the LEDs (best effort) before releasing the driver so they do not
    * stay lit. Safe to call multiple times. After end(), isInitialized()
    * returns false. Call begin() to restart.
+   *
+   * @note Cleanup waits are bounded; a hardware fault can prevent blanking.
+   *       The accepted configuration and output-error history remain available.
    */
   void end();
 
@@ -354,14 +371,18 @@ class StatusLed {
    * @brief Set per-LED brightness (0..255).
    * @param index LED index (0..ledCount-1).
    * @param level Brightness level.
-   * @return Status Ok on success, or INVALID_CONFIG on bad index.
+   * @return Status Ok, NOT_INITIALIZED before begin(), or INVALID_CONFIG on a
+   *         bad index.
+   * @note Does not cancel temporary state; the new level survives its revert.
    */
   Status setBrightness(uint8_t index, uint8_t level);
 
   /**
    * @brief Set global brightness (0..255) for all LEDs.
    * @param level Brightness level.
-   * @return Status Ok on success.
+   * @return Status Ok, or NOT_INITIALIZED before begin().
+   * @note Updates Config::globalBrightness and marks changed pixels for the
+   *       next eligible tick(); it does not transmit synchronously.
    */
   Status setGlobalBrightness(uint8_t level);
 
@@ -373,6 +394,8 @@ class StatusLed {
    * kept. LEDs remain initialized; call end() to release resources.
    *
    * @return Status Ok on success, or NOT_INITIALIZED if begin() not called.
+   * @note Marks changed pixels for the next eligible tick(); it does not
+   *       transmit synchronously.
    */
   Status clear();
 
@@ -426,14 +449,18 @@ class StatusLed {
    * @brief Request output retransmission on the next eligible tick().
    * @note Useful after suspected data line noise or external interference.
    *       Backend readiness and the 100 ms failure retry interval still apply.
+   *       Calling before begin() is a no-op.
    */
   void forceRefresh();
 
   /**
    * @brief Get a snapshot of LED state.
    * @param index LED index (0..ledCount-1).
-   * @param out Snapshot output.
-   * @return Status Ok on success, or INVALID_CONFIG on bad index.
+   * @param out Non-null snapshot output.
+   * @return Status Ok, NOT_INITIALIZED before begin(), or INVALID_CONFIG for a
+   *         null output pointer or bad index.
+   * @note This const query does not update lastStatus(). Animation intensity
+   *       reflects the most recent tick(), not pending setter work.
    */
   Status getLedSnapshot(uint8_t index, LedSnapshot* out) const;
 
@@ -442,19 +469,25 @@ class StatusLed {
    * @param mode Mode to query.
    * @return ModeParams defaults for that mode. Fixed-pattern and random modes
    *         return the struct defaults, which they then ignore.
+   * @note Unknown enum values also return a default-constructed ModeParams.
    */
   static ModeParams getModeDefaults(Mode mode);
 
   /// @brief Check if library is currently initialized.
   /// @return true after successful begin() and before end().
+  /// @note Has no side effects and does not update lastStatus().
   bool isInitialized() const { return _initialized; }
 
   /// @brief Get current configuration.
-  /// @return Configuration accepted by the most recent successful begin().
+  /// @return Last accepted configuration; globalBrightness reflects any later
+  ///         successful setGlobalBrightness() call.
+  /// @note The reference remains owned by this object; rejected begin() calls
+  ///       and end() do not replace the accepted values.
   const Config& getConfig() const { return _config; }
 
   /// @brief Alias for getConfig(), matching shorter sibling-library accessors.
-  /// @return Configuration accepted by the most recent successful begin().
+  /// @return Active/last-accepted configuration returned by getConfig().
+  /// @note Identical lifetime and side effects to getConfig().
   const Config& config() const { return getConfig(); }
 
   /// @brief Get the status recorded by the last fallible public operation.
@@ -467,6 +500,7 @@ class StatusLed {
 
   /// @brief Alias for getLastStatus().
   /// @return Last status from a fallible public operation.
+  /// @note Has no side effects.
   Status lastStatus() const { return getLastStatus(); }
 
   /// @brief Count backend-rejected frames, excluding RESOURCE_BUSY.
@@ -483,6 +517,8 @@ class StatusLed {
 
   /// @brief Get number of LEDs configured.
   /// @return Configured LED count, or the last accepted count after end().
+  /// @note Returns zero until the first successful begin(); rejected begin()
+  ///       calls do not change it.
   uint8_t ledCount() const { return _config.ledCount; }
 
  private:

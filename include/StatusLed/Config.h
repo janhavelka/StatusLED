@@ -45,8 +45,9 @@ struct Config {
   ColorOrder colorOrder = ColorOrder::GRB;
 
   /// @brief RMT channel (ESP32-S2/S3: 0..3).
-  /// @note Used by legacy IDF/NeoPixelBus backends. Ignored by STATUSLED_BACKEND_IDF5_WS2812.
-  /// @note Validated in begin().
+  /// @note Used by legacy IDF/NeoPixelBus backends. The IDF5 backend allocates
+  ///       a channel dynamically and otherwise ignores this field.
+  /// @note The common begin() validation requires 0..3 for every backend.
   uint8_t rmtChannel = 0;
 
   /// @brief Global brightness scale (0..255).
