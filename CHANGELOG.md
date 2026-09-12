@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Planned next release: `1.4.0`, following published `1.3.0`. This consolidates
+the unreleased fixes and backward-compatible additions into one minor release.
+
 Unreleased correctness changes from a full audit of the engine, both RMT
 backends and the documentation. Remaining operational limitations are documented in README.
 
