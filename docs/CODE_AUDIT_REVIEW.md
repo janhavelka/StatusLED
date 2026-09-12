@@ -13,11 +13,12 @@ sizes; the gap was that symbolic assertions could not detect a missing override.
 `native_max` now has an independent test marker requiring capacity 255, while
 `native` requires 10. All 60 test registrations are retained in each environment.
 
-Release follow-up on **2026-09-07** set the additive public API release to
+Development follow-up on **2026-09-07** set the additive public API package version to
 **1.5.0**, regenerated the tracked version header and aligned the package,
 component, Doxygen and README versions. The historical audit's framing now
 explicitly scopes its findings and 43-test baseline to `a7e0e4e` while preserving
-the original finding table and body. The CI evidence below covers release
+the original finding table and body. No GitHub release was published for that
+development version. The CI evidence below covers development
 commit **ea30d48**, including the follow-up regression and workflow assertions.
 
 ## Findings and decisions

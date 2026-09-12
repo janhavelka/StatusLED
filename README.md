@@ -10,6 +10,10 @@ health, error blips), plus the bundled CLI example for bench-testing a board.
 
 PlatformIO package name: `status-led`.
 
+The latest published release is [v1.3.0](https://github.com/janhavelka/StatusLED/releases/tag/v1.3.0).
+This README describes the Unreleased development API. The example below pins
+the reviewed development commit that provides these features.
+
 ## Quickstart (bench CLI)
 
 ```bash
@@ -26,7 +30,7 @@ Type `help` in the monitor. On Windows use `.\scripts\pio.cmd` instead of `pio`.
 
 ```ini
 lib_deps =
-  https://github.com/janhavelka/StatusLED.git#v1.5.0
+  https://github.com/janhavelka/StatusLED.git#6d5ab7751e5e73ba34824f552a419ceb72d22050
 build_flags =
   -DSTATUSLED_BACKEND_IDF5_WS2812=1   ; Arduino core 3.x (IDF 5.x)
   ; -DSTATUSLED_BACKEND_IDF_WS2812=1  ; Arduino core 2.x (IDF 4.4)
@@ -395,8 +399,8 @@ valid header.
 
 ```cpp
 #include "StatusLed/Version.h"
-Serial.println(StatusLed::VERSION);       // "1.5.0"
-Serial.println(StatusLed::VERSION_FULL);  // "1.5.0 (commit, date time)"
+Serial.println(StatusLed::VERSION);       // package version
+Serial.println(StatusLed::VERSION_FULL);  // package version plus commit and build time
 ```
 
 ## API Documentation

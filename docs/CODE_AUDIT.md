@@ -503,7 +503,7 @@ pass. Two claims from the first pass were wrong and are corrected below.
 
 Fixed during this audit and folded into the documentation. Listed so an
 independent reviewer can check the implementation rather than rediscover the
-problem. Full descriptions are in `CHANGELOG.md` under 1.4.0.
+problem. Full descriptions are in [Unreleased](../CHANGELOG.md#unreleased).
 
 | Was | Resolution | Where to check |
 | --- | ---------- | -------------- |

@@ -7,14 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Unreleased correctness changes from a full audit of the engine, both RMT
+backends and the documentation. Remaining operational limitations are documented in README.
+
 ### Added
 
 - Example-only build flags for the LED data pin and count, so both CLIs can
   use the intended board wiring from their first output during boot.
-
-## [1.5.0] - 2026-09-07
-
-### Added
 
 - Persistent `outputErrorCount()` and `lastOutputStatus()` diagnostics. The
   counter saturates, excludes `RESOURCE_BUSY`, and survives successful calls
@@ -26,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Invalid sizes/channels and unavailable resources return errors.
 - CI builds Arduino RMT v2 on S2/S3 and the native ESP-IDF component on 5.3/6.0,
   including cache-safe S3 configurations; feature branches run the same checks.
+
+- 15 regression tests, 43 host tests in total. They cover the engine fixes above.
+  The backend, CLI and configuration-rejection fixes are not reachable from the
+  host build and were verified by compilation and review instead.
 
 ### Fixed
 
@@ -64,30 +67,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rejected reinitialization, preserving a still-running instance.
 - NeoPixelBus 2.7.6 dependencies use the exact upstream Git commit because the
   previous registry specification no longer resolves on a clean installation.
-
-### Documentation
-
-- Regenerated the tracked version header from the clean merged tree before
-  tagging v1.5.0, so ESP-IDF consumers receive clean release metadata.
-- Scoped the historical audit's findings and baseline verification to `a7e0e4e`,
-  with the implementation review providing the current state and a successful
-  12-job CI run that executed the follow-up cache-safe SDK assertions.
-- Aligned initialization-history wording, audit links and both native test
-  requirements; documented the IDF5 busy-error mapping's enabled-channel assumption.
-- Hardware smoke tests are optional in the engineering guidelines and no longer
-  block commits or pushes; validation reports still state whether they were run.
-- Reverified every original audit finding, corrected its PSRAM, timing arithmetic,
-  package-switching and resolved-cleanup claims, and recorded the decisions and
-  validation limits in `docs/CODE_AUDIT_REVIEW.md`.
-- Documented RMT memory costs, cache-safe SDK settings, output retry/health
-  semantics, capacity ABI requirements and remaining timing limitations.
-
-## [1.4.0] - 2026-09-04
-
-Correctness release from a full audit of the engine, both RMT backends and the
-documentation. Remaining operational limitations are documented in README.
-
-### Fixed
 
 - **WS2812 latch gap.** The IDF5 RMT backend emitted no reset symbol at all, so
   two frames sent close together were concatenated by the LEDs: pixel data
@@ -142,6 +121,24 @@ documentation. Remaining operational limitations are documented in README.
   is affected. NeoPixelBus reaches the LEDs through the legacy RMT driver, which
   Arduino core 3.x does not provide and ESP-IDF 6.0 removed entirely.
 
+### Documentation
+
+- Regenerated the tracked version header from the clean merged tree before
+  tagging a development version, so ESP-IDF consumers receive clean build
+  metadata. That tag did not correspond to a published GitHub release.
+- Scoped the historical audit's findings and baseline verification to `a7e0e4e`,
+  with the implementation review providing the current state and a successful
+  12-job CI run that executed the follow-up cache-safe SDK assertions.
+- Aligned initialization-history wording, audit links and both native test
+  requirements; documented the IDF5 busy-error mapping's enabled-channel assumption.
+- Hardware smoke tests are optional in the engineering guidelines and no longer
+  block commits or pushes; validation reports still state whether they were run.
+- Reverified every original audit finding, corrected its PSRAM, timing arithmetic,
+  package-switching and resolved-cleanup claims, and recorded the decisions and
+  validation limits in `docs/CODE_AUDIT_REVIEW.md`.
+- Documented RMT memory costs, cache-safe SDK settings, output retry/health
+  semantics, capacity ABI requirements and remaining timing limitations.
+
 ### Changed
 
 - **Temporary presets now have one consistent cancellation rule.** `setMode()`,
@@ -187,12 +184,6 @@ documentation. Remaining operational limitations are documented in README.
   `hazard`, and `lowbattery` to `lowbat`. The old words no longer parse.
 - The RMT v2 backend waits up to 50 ms rather than 10 ms for the queue to drain
   in `end()`, so a slow transfer completes instead of being abandoned.
-
-### Added
-
-- 15 regression tests, 43 host tests in total. They cover the engine fixes above.
-  The backend, CLI and configuration-rejection fixes are not reachable from the
-  host build and were verified by compilation and review instead.
 
 ### Removed
 
@@ -288,9 +279,13 @@ documentation. Remaining operational limitations are documented in README.
 ### Security
 - Nothing yet
 
-## [1.0.0] - 2026-02-02
+### Includes earlier development work
 
-### Added
+These changes were included in this published release; their earlier numbered
+notes did not correspond to separate published GitHub releases.
+
+#### Added
+
 - StatusLed library with non-blocking status LED engine
 - Mode/preset architecture with color separation and dirty-frame updates
 - NeoPixelBus backend (RMT) with configurable channel selection
@@ -298,27 +293,27 @@ documentation. Remaining operational limitations are documented in README.
 - Interactive CLI example with full API access and stress test
 - Host-based unit tests for timing/state transitions
 
-### Changed
+#### Changed
+
 - Updated README and AGENTS guidelines for status LED subsystem
 - Updated PlatformIO environments and backend selection macros
 
-### Removed
+#### Removed
+
 - Removed compile-only example in favor of a single fully featured CLI demo
 
-### Fixed
+#### Fixed
+
 - Hardened backend selection guards and compilation isolation
 - Added bounds checks and nonblocking guards in backends and engine
 
-### Security
+#### Security
+
 - Nothing yet
 
+[Unreleased]: https://github.com/janhavelka/StatusLED/compare/v1.3.0...HEAD
 [1.3.0]: https://github.com/janhavelka/StatusLED/compare/v1.2.0...v1.3.0
-[1.2.0]: https://github.com/janhavelka/StatusLED/releases/tag/v1.2.0
-[1.1.0]: https://github.com/janhavelka/StatusLED/releases/tag/v1.1.0
-[1.0.2]: https://github.com/janhavelka/StatusLED/releases/tag/v1.0.2
+[1.2.0]: https://github.com/janhavelka/StatusLED/compare/v1.1.0...v1.2.0
+[1.1.0]: https://github.com/janhavelka/StatusLED/compare/v1.0.2...v1.1.0
+[1.0.2]: https://github.com/janhavelka/StatusLED/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/janhavelka/StatusLED/releases/tag/v1.0.1
-[1.0.0]: https://github.com/janhavelka/StatusLED/releases/tag/v1.0.0
-
-[1.4.0]: https://github.com/janhavelka/StatusLED/compare/v1.3.0...v1.4.0
-[1.5.0]: https://github.com/janhavelka/StatusLED/compare/v1.4.0...v1.5.0
-[Unreleased]: https://github.com/janhavelka/StatusLED/compare/v1.5.0...HEAD
