@@ -1,6 +1,8 @@
 version: "1.5.0"
 description: "Production-grade status LED subsystem for ESP32-S2/S3"
 license: "MIT"
+maintainers:
+  - "Jan Havelka (THYMOS Solution s.r.o.) <info@thymos.cz>"
 url: "https://github.com/janhavelka/StatusLED"
 repository: "https://github.com/janhavelka/StatusLED.git"
 targets:
