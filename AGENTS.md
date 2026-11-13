@@ -67,7 +67,7 @@ include/StatusLed/   - Public API headers ONLY (Doxygen documented)
 src/                 - Engine (StatusLed.cpp) + one file per output backend
 examples/            - Arduino CLI, native ESP-IDF CLI, shared example helpers
 test/                - Host (native) unit tests
-scripts/             - Version generator, text-integrity check, PlatformIO wrapper
+scripts/             - Version generator (sync/check), text-integrity check, PlatformIO wrapper
 ```
 
 **Rules:**

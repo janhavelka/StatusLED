@@ -417,10 +417,23 @@ sure `g++` is in `PATH`.
 
 ## Versioning
 
-The version lives in `library.json` / `idf_component.yml`. The PlatformIO
-pre-build script regenerates `include/StatusLed/Version.h` from it; the file is
-also tracked so that ESP-IDF consumers (which do not run the script) get a
-valid header.
+`library.json` is the version source. `include/StatusLed/Version.h`,
+`idf_component.yml` and the `Doxyfile` `PROJECT_NUMBER` are generated from it:
+
+```bash
+python scripts/generate_version.py sync    # rewrite generated files after a version change
+python scripts/generate_version.py check   # read-only; exits 1 if anything is out of date
+```
+
+`Version.h` is tracked and deterministic (no timestamp, no Git data), so ESP-IDF
+consumers, which do not run the script, get a valid header and builds do not
+modify the working tree. PlatformIO builds run the same script as a pre-script:
+it only syncs when the generated files differ, and it injects the build date,
+time, Git commit and Git dirty state as compile definitions
+(`STATUSLED_BUILD_DATE`, `STATUSLED_BUILD_TIME`, `STATUSLED_BUILD_TIMESTAMP`,
+`STATUSLED_GIT_COMMIT`, `STATUSLED_GIT_STATUS`). Without them (for example in
+ESP-IDF) `BUILD_DATE`/`BUILD_TIME` use the compiler's `__DATE__`/`__TIME__`
+and `GIT_COMMIT`/`GIT_STATUS` are `"unknown"`. CI runs `check`.
 
 ```cpp
 #include "StatusLed/Version.h"
